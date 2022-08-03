@@ -57,7 +57,6 @@
 #include <xcb/xcb_renderutil.h>
 #endif
 
-#include <QWidget>
 #include <QGuiApplication>
 #include <QLibrary>
 #include <QDrag>
