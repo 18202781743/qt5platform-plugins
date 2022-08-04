@@ -1,4 +1,4 @@
-#include <KWayland/Client/plasmashell.h>
+#include <DWayland/Client/plasmashell.h>
 
 int main()
 {
