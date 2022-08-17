@@ -192,18 +192,19 @@ void DWaylandShellManager::sendProperty(QWaylandShellSurface *self, const QStrin
         }
         if (!name.compare(splitWindowOnScreen)) {
             using KWayland::Client::DDEShellSurface;
-            bool ok = false;
-            qreal leftOrRight  = value.toInt(&ok);
-            if (ok) {
-                dde_shell_surface->requestSplitWindow(DDEShellSurface::SplitType(leftOrRight));
-                qCDebug(dwlp) << "requestSplitWindow value: " << leftOrRight;
+            const auto tmp = value.toList();
+            if (tmp.size() >= 2) {
+                const auto &position = tmp[0].toInt();
+                const auto &type = tmp[1].toInt();
+//                dde_shell_surface->requestSplitWindow(DDEShellSurface::SplitType(position), type);
+                qCDebug(dwlp) << "requestSplitWindow splitType: " << position << " mode: " << type;
             } else {
                 qCWarning(dwlp) << "invalid property: " << name << value;
             }
             wlWindow->window()->setProperty(splitWindowOnScreen, 0);
         }
         if (!name.compare(supportForSplittingWindow)) {
-            wlWindow->window()->setProperty(supportForSplittingWindow, dde_shell_surface->isSplitable());
+//            wlWindow->window()->setProperty(supportForSplittingWindow, dde_shell_surface->getSplitable());
             return;
         }
         if (!name.compare(windowInWorkSpace)) {
