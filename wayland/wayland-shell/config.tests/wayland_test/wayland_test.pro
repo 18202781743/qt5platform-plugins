@@ -11,8 +11,13 @@ QT += waylandclient-private
 
 TARGET = wayland_test
 
-QT       += DWaylandClient
-LIBS     += -lDWaylandClient
+isEmpty(D_DEEPIN_IS_DWAYLAND) {
+    QT       += KWaylandClient
+    LIBS     += -lKF5WaylandClient
+} else {
+    QT       += DWaylandClient
+    LIBS     += -lDWaylandClient
+}
 CONFIG += link_pkgconfig
 PKGCONFIG += Qt5WaylandClient
 # xkb

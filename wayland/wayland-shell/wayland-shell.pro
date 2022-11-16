@@ -4,8 +4,17 @@
 #
 #-------------------------------------------------
 
-QT       += DWaylandClient
-LIBS     += -lDWaylandClient
+load(configure)
+qtCompileTest(dwayland_or_kwayland_test) {
+    QT       += DWaylandClient
+    LIBS     += -lDWaylandClient
+
+    DEFINES += D_DEEPIN_IS_DWAYLAND
+} else {
+    QT       += KWaylandClient
+    LIBS     += -lKF5WaylandClient
+}
+
 # qtCompileTest 容易失败，加 recheck 更新缓存
 CONFIG += link_pkgconfig plugin recheck
 PKGCONFIG += Qt5WaylandClient
@@ -20,7 +29,6 @@ QT += xkbcommon_support-private
 TARGET = kwayland-shell
 TEMPLATE = lib
 
-load(configure)
 qtCompileTest(deepin-kwin-test) {
     DEFINES += D_DEEPIN_KWIN
 }

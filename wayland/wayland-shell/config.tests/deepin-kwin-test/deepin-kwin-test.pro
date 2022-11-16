@@ -1,3 +1,7 @@
 CONFIG += qt
-QT += DWaylandClient
+isEmpty(D_DEEPIN_IS_DWAYLAND) {
+    QT += KWaylandClient
+} else {
+    QT += DWaylandClient
+}
 SOURCES += main.cpp
