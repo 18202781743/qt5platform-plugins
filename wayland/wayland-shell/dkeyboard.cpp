@@ -93,24 +93,29 @@ static bool createDefaultKeymap()
 DKeyboard::DKeyboard(QObject *parent)
     : QObject(parent)
 {
-
+    qCDebug(dkeyboard) << "DKeyboard constructor called";
 }
 
 DKeyboard::~DKeyboard()
 {
-
+    qCDebug(dkeyboard) << "DKeyboard destructor called";
 }
 
 void DKeyboard::handleKeyEvent(quint32 key, DDEKeyboard::KeyState state, quint32 time)
 {
+    qCDebug(dkeyboard) << "handleKeyEvent called, key:" << key << "state:" << int(state) << "time:" << time;
     QWaylandWindow *window = dynamic_cast<QWaylandWindow *>(parent());
 
-    if (!window || !window->window() || window->isActive())
+    if (!window || !window->window() || window->isActive()) {
+        qCDebug(dkeyboard) << "Window not available or not active, skipping key event";
         return;
+    }
 
 //#if QT_CONFIG(xkbcommon)
-    if ((!mXkbKeymap || !mXkbState) && !createDefaultKeymap())
+    if ((!mXkbKeymap || !mXkbState) && !createDefaultKeymap()) {
+        qCDebug(dkeyboard) << "Failed to create default keymap, skipping key event";
         return;
+    }
 
     QEvent::Type type = state == DDEKeyboard::KeyState::Pressed ? QEvent::KeyPress : QEvent::KeyRelease;
 //    qCDebug(dkeyboard) << __func__ << " key " << key << " state " << int(state) << " time " << time;

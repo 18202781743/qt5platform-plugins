@@ -20,9 +20,16 @@
 #include <qpa/qplatformwindow.h>
 #include <QGuiApplication>
 #include <QStyleHints>
+#include <QLoggingCategory>
 
 #define _DEEPIN_SCISSOR_WINDOW "_DEEPIN_SCISSOR_WINDOW"
 Q_DECLARE_METATYPE(QPainterPath)
+
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
 
 extern QWidget *qt_button_down;
 
@@ -37,12 +44,16 @@ DNoTitlebarWindowHelper::DNoTitlebarWindowHelper(QWindow *window, quint32 window
     , m_window(window)
     , m_windowID(windowID)
 {
+    qCDebug(dxcb) << "DNoTitlebarWindowHelper constructor called, windowID:" << windowID;
     // 不允许设置窗口为无边框的
-    if (window->flags().testFlag(Qt::FramelessWindowHint))
+    if (window->flags().testFlag(Qt::FramelessWindowHint)) {
+        qCDebug(dxcb) << "Removing FramelessWindowHint flag";
         window->setFlags(window->flags() & ~Qt::FramelessWindowHint);
+    }
 
     // 初始化窗口类型判断结果
     m_isQuickWindow = window->inherits("QQuickWindow");
+    qCDebug(dxcb) << "Window is QuickWindow:" << m_isQuickWindow;
 
     mapped[window] = this;
     m_nativeSettingsValid = DPlatformIntegration::buildNativeSettings(this, windowID);
@@ -50,6 +61,7 @@ DNoTitlebarWindowHelper::DNoTitlebarWindowHelper(QWindow *window, quint32 window
 
     // 本地设置无效时不可更新窗口属性，否则会导致setProperty函数被循环调用
     if (m_nativeSettingsValid) {
+        qCDebug(dxcb) << "Native settings valid, updating window properties";
         updateClipPathFromProperty();
         updateFrameMaskFromProperty();
         updateWindowRadiusFromProperty();
@@ -67,11 +79,12 @@ DNoTitlebarWindowHelper::DNoTitlebarWindowHelper(QWindow *window, quint32 window
         updateWindowBlurPathsFromProperty();
         updateAutoInputMaskByClipPathFromProperty();
     } else {
-        qWarning() << "native settings is invalid for window: 0x" << /*hex <<*/ windowID;
+        qCWarning(dxcb) << "Native settings is invalid for window: 0x" << windowID;
     }
 
     connect(DWMSupport::instance(), &DXcbWMSupport::hasScissorWindowChanged, this, &DNoTitlebarWindowHelper::updateWindowShape);
     connect(DWMSupport::instance(), &DXcbWMSupport::hasBlurWindowChanged, this, [this] (bool blur) {
+        qCDebug(dxcb) << "Blur window changed:" << blur;
         // 检测到窗口管理器支持模糊时，应该重新更新模糊属性。否则可能会导致模糊失效，如kwin在某些情况下可能会删除窗口的模糊属性
         if (blur) {
             updateWindowBlurAreasForWM();
@@ -83,15 +96,18 @@ DNoTitlebarWindowHelper::DNoTitlebarWindowHelper(QWindow *window, quint32 window
 
 DNoTitlebarWindowHelper::~DNoTitlebarWindowHelper()
 {
+    qCDebug(dxcb) << "DNoTitlebarWindowHelper destructor called";
     g_pressPoint.remove(this);
 
     if (VtableHook::hasVtable(m_window)) {
+        qCDebug(dxcb) << "Resetting vtable for window";
         VtableHook::resetVtable(m_window);
     }
 
     mapped.remove(static_cast<QWindow*>(parent()));
 
     if (m_window->handle()) { // 当本地窗口还存在时，移除设置过的窗口属性
+        qCDebug(dxcb) << "Clearing window properties";
         Utility::clearWindowProperty(m_windowID, Utility::internAtom(_DEEPIN_SCISSOR_WINDOW));
         DPlatformIntegration::clearNativeSettings(m_windowID);
     }
@@ -99,16 +115,20 @@ DNoTitlebarWindowHelper::~DNoTitlebarWindowHelper()
 
 void DNoTitlebarWindowHelper::setWindowProperty(QWindow *window, const char *name, const QVariant &value)
 {
+    qCDebug(dxcb) << "setWindowProperty called, name:" << name << "value:" << value;
     const QVariant &old_value = window->property(name);
 
-    if (old_value == value)
+    if (old_value == value) {
+        qCDebug(dxcb) << "Property value unchanged, skipping update";
         return;
+    }
 
     if (value.typeName() == QByteArray("QPainterPath")) {
         const QPainterPath &old_path = qvariant_cast<QPainterPath>(old_value);
         const QPainterPath &new_path = qvariant_cast<QPainterPath>(value);
 
         if (old_path == new_path) {
+            qCDebug(dxcb) << "PainterPath unchanged, skipping update";
             return;
         }
     }
@@ -118,6 +138,7 @@ void DNoTitlebarWindowHelper::setWindowProperty(QWindow *window, const char *nam
     if (DNoTitlebarWindowHelper *self = mapped.value(window)) {
         // 本地设置无效时不可更新窗口属性，否则会导致setProperty函数被循环调用
         if (!self->m_nativeSettingsValid) {
+            qCDebug(dxcb) << "Native settings invalid, skipping property update";
             return;
         }
 
@@ -132,20 +153,23 @@ void DNoTitlebarWindowHelper::setWindowProperty(QWindow *window, const char *nam
         const QByteArray slot_name = "update" + name_array.mid(3) + "FromProperty";
 
         if (!QMetaObject::invokeMethod(self, slot_name.constData(), Qt::DirectConnection)) {
-            qWarning() << "Failed to update property:" << slot_name;
+            qCWarning(dxcb) << "Failed to update property:" << slot_name;
         }
     }
 }
 
 static QPair<qreal, qreal> takePair(const QVariant &value, const QPair<qreal, qreal> defaultValue)
 {
+    qCDebug(dxcb) << "takePair called, value:" << value;
     if (!value.isValid()) {
+        qCDebug(dxcb) << "Value invalid, returning default";
         return defaultValue;
     }
 
     const QStringList &l = value.toString().split(',');
 
     if (l.count() < 2) {
+        qCDebug(dxcb) << "Invalid pair format, returning default";
         return defaultValue;
     }
 
@@ -154,23 +178,29 @@ static QPair<qreal, qreal> takePair(const QVariant &value, const QPair<qreal, qr
     ret.first = l.first().toDouble();
     ret.second = l.at(1).toDouble();
 
+    qCDebug(dxcb) << "Parsed pair:" << ret;
     return ret;
 }
 
 static QMarginsF takeMargins(const QVariant &value, const QMarginsF &defaultValue)
 {
+    qCDebug(dxcb) << "takeMargins called, value:" << value;
     if (!value.isValid()) {
+        qCDebug(dxcb) << "Value invalid, returning default margins";
         return defaultValue;
     }
 
     const QStringList &l = value.toString().split(',');
 
     if (l.count() < 4) {
+        qCDebug(dxcb) << "Invalid margins format, returning default";
         return defaultValue;
     }
 
-    return QMarginsF(l.at(0).toDouble(), l.at(1).toDouble(),
+    QMarginsF margins(l.at(0).toDouble(), l.at(1).toDouble(),
                      l.at(2).toDouble(), l.at(3).toDouble());
+    qCDebug(dxcb) << "Parsed margins:" << margins;
+    return margins;
 }
 
 static inline QPointF toPos(const QPair<qreal, qreal> &pair)
@@ -180,6 +210,7 @@ static inline QPointF toPos(const QPair<qreal, qreal> &pair)
 
 QString DNoTitlebarWindowHelper::theme() const
 {
+    qCDebug(dxcb) << "theme called";
     return property("theme").toString();
 }
 
@@ -249,57 +280,68 @@ void DNoTitlebarWindowHelper::setWindowRadius(const QPointF &windowRadius)
 
 void DNoTitlebarWindowHelper::setBorderWidth(qreal borderWidth)
 {
+    qCDebug(dxcb) << "setBorderWidth called, borderWidth:" << borderWidth;
     setProperty("borderWidth", borderWidth);
 }
 
 void DNoTitlebarWindowHelper::setBorderColor(const QColor &borderColor)
 {
+    qCDebug(dxcb) << "setBorderColor called, borderColor:" << borderColor;
     setProperty("borderColor", QVariant::fromValue(borderColor));
 }
 
 void DNoTitlebarWindowHelper::setShadowRadius(qreal shadowRadius)
 {
+    qCDebug(dxcb) << "setShadowRadius called, shadowRadius:" << shadowRadius;
     setProperty("shadowRadius", shadowRadius);
 }
 
 void DNoTitlebarWindowHelper::setShadowOffect(const QPointF &shadowOffect)
 {
+    qCDebug(dxcb) << "setShadowOffect called, shadowOffect:" << shadowOffect;
     setProperty("shadowOffset", QString("%1,%2").arg(shadowOffect.x()).arg(shadowOffect.y()));
 }
 
 void DNoTitlebarWindowHelper::setShadowColor(const QColor &shadowColor)
 {
+    qCDebug(dxcb) << "setShadowColor called, shadowColor:" << shadowColor;
     setProperty("shadowColor", QVariant::fromValue(shadowColor));
 }
 
 void DNoTitlebarWindowHelper::setMouseInputAreaMargins(const QMarginsF &mouseInputAreaMargins)
 {
+    qCDebug(dxcb) << "setMouseInputAreaMargins called, mouseInputAreaMargins:" << mouseInputAreaMargins;
     setProperty("mouseInputAreaMargins", QString("%1,%2,%3,%4").arg(mouseInputAreaMargins.left()).arg(mouseInputAreaMargins.top())
                                                                .arg(mouseInputAreaMargins.right()).arg(mouseInputAreaMargins.bottom()));
 }
 
 void DNoTitlebarWindowHelper::setWindowEffect(quint32 effectScene)
 {
+    qCDebug(dxcb) << "setWindowEffect called, effectScene:" << effectScene;
     setProperty("windowEffect", effectScene);
 }
 
 void DNoTitlebarWindowHelper::setWindowStartUpEffect(quint32 effectType)
 {
+    qCDebug(dxcb) << "setWindowStartUpEffect called, effectType:" << effectType;
     setProperty("windowStartUpEffect", effectType);
 }
 
 DNoTitlebarWindowHelper *DNoTitlebarWindowHelper::windowHelper(const QWindow *window)
 {
+    qCDebug(dxcb) << "windowHelper called for window:" << window;
     return mapped.value(window);
 }
 
 void DNoTitlebarWindowHelper::updateClipPathFromProperty()
 {
+    qCDebug(dxcb) << "updateClipPathFromProperty called";
     const QVariant &v = m_window->property(clipPath);
     const QPainterPath &path = qvariant_cast<QPainterPath>(v);
     static xcb_atom_t _deepin_scissor_window = Utility::internAtom(_DEEPIN_SCISSOR_WINDOW, false);
 
     if (!path.isEmpty()) {
+        qCDebug(dxcb) << "Clip path is not empty, updating window property";
         m_clipPath = path * m_window->screen()->devicePixelRatio();
 
         QByteArray data;
@@ -307,6 +349,7 @@ void DNoTitlebarWindowHelper::updateClipPathFromProperty()
         ds << m_clipPath;
         Utility::setWindowProperty(m_windowID, _deepin_scissor_window, _deepin_scissor_window, data.constData(), data.length(), 8);
     } else {
+        qCDebug(dxcb) << "Clip path is empty, clearing window property";
         m_clipPath = QPainterPath();
         Utility::clearWindowProperty(m_windowID, _deepin_scissor_window);
     }
@@ -316,31 +359,38 @@ void DNoTitlebarWindowHelper::updateClipPathFromProperty()
 
 void DNoTitlebarWindowHelper::updateFrameMaskFromProperty()
 {
+    qCDebug(dxcb) << "updateFrameMaskFromProperty called - TODO";
     // TODO
 }
 
 void DNoTitlebarWindowHelper::updateWindowRadiusFromProperty()
 {
+    qCDebug(dxcb) << "updateWindowRadiusFromProperty called";
     const QVariant &v = m_window->property("_d_windowRadius");
     bool ok;
     int radius = v.toInt(&ok);
 
     if (ok) {
+        qCDebug(dxcb) << "Window radius property found:" << radius;
         setWindowRadius(QPointF(radius, radius) * m_window->screen()->devicePixelRatio());
     } else {
+        qCDebug(dxcb) << "Window radius property not found, resetting";
         resetProperty("windowRadius");
     }
 }
 
 void DNoTitlebarWindowHelper::updateBorderWidthFromProperty()
 {
+    qCDebug(dxcb) << "updateBorderWidthFromProperty called";
     const QVariant &v = m_window->property("_d_borderWidth");
     bool ok;
     int width = v.toInt(&ok);
 
     if (ok) {
+        qCDebug(dxcb) << "Border width property found:" << width;
         setBorderWidth(width);
     } else {
+        qCDebug(dxcb) << "Border width property not found, resetting";
         resetProperty("borderWidth");
     }
 }

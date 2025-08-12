@@ -9,6 +9,7 @@
 #include "dplatformintegration.h"
 
 #include "dwmsupport.h"
+#include <QLoggingCategory>
 
 #ifdef Q_OS_LINUX
 #include "xcbnativeeventfilter.h"
@@ -19,22 +20,31 @@ typedef QXcbNativeInterface DPlatformNativeInterface;
 typedef QWindowsGdiNativeInterface DPlatformNativeInterface;
 #endif
 
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
+
 DPP_BEGIN_NAMESPACE
 
 static QString version()
 {
+    qCDebug(dxcb) << "version called";
     return QStringLiteral(DXCB_VERSION);
 }
 
 #ifdef Q_OS_LINUX
 static DeviceType _inputEventSourceDevice(const QInputEvent *event)
 {
+    qCDebug(dxcb) << "_inputEventSourceDevice called";
     return DPlatformIntegration::instance()->eventFilter()->xiEventSource(event);
 }
 #endif
 
 static QFunctionPointer getFunction(const QByteArray &function)
 {
+    qCDebug(dxcb) << "getFunction called, function:" << function;
     static QHash<QByteArray, QFunctionPointer> functionCache = {
         {setWmBlurWindowBackgroundArea, reinterpret_cast<QFunctionPointer>(&Utility::blurWindowBackground)},
         {setWmBlurWindowBackgroundPathList, reinterpret_cast<QFunctionPointer>(&Utility::blurWindowBackgroundByPaths)},
@@ -82,15 +92,19 @@ static QFunctionPointer getFunction(const QByteArray &function)
         {supportForSplittingWindowByType, reinterpret_cast<QFunctionPointer>(&Utility::supportForSplittingWindowByType)}
     };
 
-    return functionCache.value(function);
+    QFunctionPointer result = functionCache.value(function);
+    qCDebug(dxcb) << "Function found:" << (result != nullptr);
+    return result;
 }
 
 QFunctionPointer DPlatformNativeInterfaceHook::platformFunction(QPlatformNativeInterface *interface, const QByteArray &function)
 {
+    qCDebug(dxcb) << "platformFunction called, function:" << function;
     QFunctionPointer f = getFunction(function);
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 4, 0)
         if (!f) {
+            qCDebug(dxcb) << "Function not found in cache, calling original";
             f = static_cast<DPlatformNativeInterface*>(interface)->DPlatformNativeInterface::platformFunction(function);
         }
 #endif

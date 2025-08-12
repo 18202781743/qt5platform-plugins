@@ -150,22 +150,25 @@ static void checkIsDWayland(const QString &function)
 DWaylandShellManager::DWaylandShellManager()
     : m_registry (new Registry())
 {
-
+    qCDebug(dwlp) << "DWaylandShellManager constructor called";
 }
 
 DWaylandShellManager::~DWaylandShellManager()
 {
-
+    qCDebug(dwlp) << "DWaylandShellManager destructor called";
 }
 
 void DWaylandShellManager::sendProperty(QWaylandShellSurface *self, const QString &name, const QVariant &value)
 {
+    qCDebug(dwlp) << "sendProperty called, name:" << name << "value:" << value;
     // 某些应用程序(比如日历，启动器)调用此方法时 self为空，导致插件崩溃
     if (Q_UNLIKELY(!self)) {
+        qCDebug(dwlp) << "Self is null, skipping property send";
         return;
     }
 
     if (Q_UNLIKELY(!CHECK_PREFIX(name))) {
+        qCDebug(dwlp) << "Property name does not match prefix, delegating to original method";
         HookCall(self, &QWaylandShellSurface::sendProperty, name, value);
         return;
     }
@@ -180,6 +183,7 @@ void DWaylandShellManager::sendProperty(QWaylandShellSurface *self, const QStrin
     // 记录下本次的设置行为，kwayland_shell创建后会重新设置这些属性
     auto *ksurface = ensureKWaylandSurface(self);
     if (Q_UNLIKELY(!ksurface)) {
+        qCDebug(dwlp) << "KWayland surface not available, adding to pending list";
         send_property_window_list << wlWindow;
         return;
     }
@@ -323,9 +327,11 @@ void DWaylandShellManager::setGeometry(QPlatformWindow *self, const QRect &rect)
 
 void DWaylandShellManager::pointerEvent(const QPointF &pointF, QEvent::Type type)
 {
+    qCDebug(dwlp) << "pointerEvent called, pointF:" << pointF << "type:" << type;
     if (Q_UNLIKELY(!(type == QEvent::MouseButtonPress
                      || type == QEvent::MouseButtonRelease
                      || type == QEvent::Move))) {
+        qCDebug(dwlp) << "Invalid event type, skipping pointer event";
         return;
     }
     // cursor()->pointerEvent 中只用到 event.globalPos(), 即 pointF 这个参数
@@ -339,6 +345,7 @@ void DWaylandShellManager::pointerEvent(const QPointF &pointF, QEvent::Type type
 
 QWaylandShellSurface *DWaylandShellManager::createShellSurface(QWaylandShellIntegration *self, QWaylandWindow *window)
 {
+    qCDebug(dwlp) << "createShellSurface called, window:" << window;
     auto surface = HookCall(self, &QWaylandShellIntegration::createShellSurface, window);
 
     HookOverride(surface, &QWaylandShellSurface::sendProperty, DWaylandShellManager::sendProperty);
@@ -387,6 +394,7 @@ QWaylandShellSurface *DWaylandShellManager::createShellSurface(QWaylandShellInte
 
 void DWaylandShellManager::createKWaylandShell(quint32 name, quint32 version)
 {
+    qCDebug(dwlp) << "createKWaylandShell called, name:" << name << "version:" << version;
     kwayland_shell = registry()->createPlasmaShell(name, version, registry()->parent());
 
     Q_ASSERT_X(kwayland_shell, "PlasmaShell", "Registry create PlasmaShell  failed.");
@@ -408,12 +416,14 @@ void DWaylandShellManager::createKWaylandShell(quint32 name, quint32 version)
 
 void DWaylandShellManager::createKWaylandSSD(quint32 name, quint32 version)
 {
+    qCDebug(dwlp) << "createKWaylandSSD called, name:" << name << "version:" << version;
     kwayland_ssd = registry()->createServerSideDecorationManager(name, version, registry()->parent());
     Q_ASSERT_X(kwayland_ssd, "ServerSideDecorationManager", "KWayland Registry ServerSideDecorationManager failed.");
 }
 
 void DWaylandShellManager::createDDEShell(quint32 name, quint32 version)
 {
+    qCDebug(dwlp) << "createDDEShell called, name:" << name << "version:" << version;
     ddeShell = registry()->createDDEShell(name, version, registry()->parent());
     Q_ASSERT_X(ddeShell, "DDEShell", "Registry create DDEShell failed.");
 }

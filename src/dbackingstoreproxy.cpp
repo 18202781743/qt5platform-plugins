@@ -10,6 +10,7 @@
 #include <QPainter>
 #include <QOpenGLPaintDevice>
 #include <QSharedMemory>
+#include <QLoggingCategory>
 
 #include <private/qguiapplication_p.h>
 #include <private/qhighdpiscaling_p.h>
@@ -33,34 +34,47 @@
 
 #define HEADER_SIZE 16
 
+Q_DECLARE_LOGGING_CATEGORY(dplatform)
+
 DPP_BEGIN_NAMESPACE
 
 bool DBackingStoreProxy::useGLPaint(const QWindow *w)
 {
+    qCDebug(dplatform) << "useGLPaint called for window:" << w;
 #ifndef QT_NO_OPENDL
-    if (!w->supportsOpenGL())
+    if (!w->supportsOpenGL()) {
+        qCDebug(dplatform) << "Window does not support OpenGL";
         return false;
+    }
 
-    if (qEnvironmentVariableIsSet("D_NO_OPENGL") || qEnvironmentVariableIsSet("D_NO_HARDWARE_ACCELERATION"))
+    if (qEnvironmentVariableIsSet("D_NO_OPENGL") || qEnvironmentVariableIsSet("D_NO_HARDWARE_ACCELERATION")) {
+        qCDebug(dplatform) << "OpenGL disabled by environment variables";
         return false;
+    }
 
     bool envIsIntValue = false;
     bool forceGLPaint = qEnvironmentVariableIntValue("D_USE_GL_PAINT", &envIsIntValue) == 1;
     QVariant value = w->property(enableGLPaint);
 
     if (envIsIntValue && !forceGLPaint) {
+        qCDebug(dplatform) << "GL paint disabled by environment variable";
         return false;
     }
 
-    return value.isValid() ? value.toBool() : forceGLPaint;
+    bool result = value.isValid() ? value.toBool() : forceGLPaint;
+    qCDebug(dplatform) << "useGLPaint result:" << result;
+    return result;
 #else
+    qCDebug(dplatform) << "OpenGL not available";
     return false;
 #endif
 }
 
 bool DBackingStoreProxy::useWallpaperPaint(const QWindow *w)
 {
-    return w->property("_d_dxcb_wallpaper").isValid();
+    bool result = w->property("_d_dxcb_wallpaper").isValid();
+    qCDebug(dplatform) << "useWallpaperPaint called, result:" << result;
+    return result;
 }
 
 DBackingStoreProxy::DBackingStoreProxy(QPlatformBackingStore *proxy, bool useGLPaint, bool useWallpaper)
@@ -69,8 +83,10 @@ DBackingStoreProxy::DBackingStoreProxy(QPlatformBackingStore *proxy, bool useGLP
     , enableGL(useGLPaint)
     , enableWallpaper(useWallpaper)
 {
+    qCDebug(dplatform) << "DBackingStoreProxy constructor called, useGLPaint:" << useGLPaint << "useWallpaper:" << useWallpaper;
 #ifndef DISABLE_WALLPAPER
     if (useWallpaper) {
+        qCDebug(dplatform) << "Setting up wallpaper connections";
         QObject::connect(DXcbWMSupport::instance(), &DXcbWMSupport::hasWallpaperEffectChanged, window(), &QWindow::requestUpdate);
         QObject::connect(DXcbWMSupport::instance(), &DXcbWMSupport::wallpaperSharedChanged, window(), [ this ] {
             updateWallpaperShared();
@@ -83,6 +99,7 @@ DBackingStoreProxy::DBackingStoreProxy(QPlatformBackingStore *proxy, bool useGLP
 
 DBackingStoreProxy::~DBackingStoreProxy()
 {
+    qCDebug(dplatform) << "DBackingStoreProxy destructor called";
     delete m_proxy;
 
     if (m_sharedMemory != nullptr)
@@ -91,18 +108,31 @@ DBackingStoreProxy::~DBackingStoreProxy()
 
 QPaintDevice *DBackingStoreProxy::paintDevice()
 {
-    if (glDevice)
+    qCDebug(dplatform) << "paintDevice called";
+    if (glDevice) {
+        qCDebug(dplatform) << "Using GL device";
         return glDevice.data();
+    }
 
-    return !m_image.isNull()? &m_image : m_proxy->paintDevice();
+    if (!m_image.isNull()) {
+        qCDebug(dplatform) << "Using cached image";
+        return &m_image;
+    } else {
+        qCDebug(dplatform) << "Using proxy paint device";
+        return m_proxy->paintDevice();
+    }
 }
 
 void DBackingStoreProxy::flush(QWindow *window, const QRegion &region, const QPoint &offset)
 {
-    if (glDevice)
+    qCDebug(dplatform) << "flush called, region:" << region << "offset:" << offset;
+    if (glDevice) {
+        qCDebug(dplatform) << "Flushing GL device";
         return glDevice->flush();
+    }
 
     if (!m_image.isNull()) {
+        qCDebug(dplatform) << "Flushing with cached image";
         QRegion expand_region;
 
         for (const QRect &r : region) {
@@ -111,6 +141,7 @@ void DBackingStoreProxy::flush(QWindow *window, const QRegion &region, const QPo
 
         m_proxy->flush(window, expand_region, offset);
     } else { // 未开启缩放补偿
+        qCDebug(dplatform) << "Flushing without scaling compensation";
         m_proxy->flush(window, region, offset);
     }
 }
@@ -158,37 +189,46 @@ QRhiTexture *DBackingStoreProxy::toTexture(QRhiResourceUpdateBatch *resourceUpda
 
 QImage DBackingStoreProxy::toImage() const
 {
+    qCDebug(dplatform) << "toImage called";
     return m_proxy->toImage();
 }
 
 QPlatformGraphicsBuffer *DBackingStoreProxy::graphicsBuffer() const
 {
+    qCDebug(dplatform) << "graphicsBuffer called";
     return m_proxy->graphicsBuffer();
 }
 
 void DBackingStoreProxy::resize(const QSize &size, const QRegion &staticContents)
 {
+    qCDebug(dplatform) << "resize called, size:" << size << "enableGL:" << enableGL;
     if (Q_LIKELY(enableGL)) {
         if (Q_LIKELY(glDevice)) {
+            qCDebug(dplatform) << "Resizing GL device";
             glDevice->resize(size);
         } else {
+            qCDebug(dplatform) << "Creating new GL device";
             glDevice.reset(new DOpenGLPaintDevice(window(), DOpenGLPaintDevice::PartialUpdateBlit));
         }
 
         return;
     }
 
+    qCDebug(dplatform) << "Resizing proxy backing store";
     m_proxy->resize(size, staticContents);
 
     if (!QHighDpiScaling::isActive()) {
+        qCDebug(dplatform) << "High DPI scaling not active, clearing image cache";
         // 清理hidpi缓存
         m_image = QImage();
         return;
     }
 
     qreal scale = QHighDpiScaling::factor(window());
+    qCDebug(dplatform) << "High DPI scale factor:" << scale;
     // 小数倍缩放时才开启此功能
     if (qCeil(scale) != qFloor(scale)) {
+        qCDebug(dplatform) << "Creating scaled image cache";
         bool hasAlpha = toImage().pixelFormat().alphaUsage() == QPixelFormat::UsesAlpha;
         m_image = QImage(window()->size() * window()->devicePixelRatio(),
                          hasAlpha ? QImage::Format_ARGB32_Premultiplied : QImage::Format_RGB32);
@@ -197,17 +237,22 @@ void DBackingStoreProxy::resize(const QSize &size, const QRegion &staticContents
 
 bool DBackingStoreProxy::scroll(const QRegion &area, int dx, int dy)
 {
+    qCDebug(dplatform) << "scroll called, area:" << area << "dx:" << dx << "dy:" << dy;
     return m_proxy->scroll(area, dx, dy);
 }
 
 void DBackingStoreProxy::beginPaint(const QRegion &region)
 {
-    if (glDevice)
+    qCDebug(dplatform) << "beginPaint called, region:" << region;
+    if (glDevice) {
+        qCDebug(dplatform) << "Using GL device, skipping beginPaint";
         return;
+    }
 
     m_proxy->beginPaint(region);
 
     qreal window_scale = window()->devicePixelRatio();
+    qCDebug(dplatform) << "Window scale:" << window_scale;
 
     bool enable = enableWallpaper && !m_wallpaper.isNull();
 
@@ -216,6 +261,7 @@ void DBackingStoreProxy::beginPaint(const QRegion &region)
 #endif
 
     if (enable) {
+        qCDebug(dplatform) << "Drawing wallpaper";
         QPainter p(paintDevice());
 
         for (QRect rect : region) {
@@ -268,9 +314,13 @@ void DBackingStoreProxy::beginPaint(const QRegion &region)
 
 void DBackingStoreProxy::endPaint()
 {
-    if (glDevice)
+    qCDebug(dplatform) << "endPaint called";
+    if (glDevice) {
+        qCDebug(dplatform) << "Using GL device, skipping endPaint";
         return;
+    }
 
+    qCDebug(dplatform) << "Ending paint with dirty rect:" << m_dirtyWindowRect;
     QPainter pa(m_proxy->paintDevice());
     pa.setRenderHints(QPainter::SmoothPixmapTransform);
     pa.setCompositionMode(QPainter::CompositionMode_Source);
@@ -282,6 +332,7 @@ void DBackingStoreProxy::endPaint()
 
 void DBackingStoreProxy::updateWallpaperShared()
 {
+    qCDebug(dplatform) << "updateWallpaperShared called";
     QString key;
 #ifndef DISABLE_WALLPAPER
     key = Utility::windowProperty(window()->winId(),
@@ -289,8 +340,10 @@ void DBackingStoreProxy::updateWallpaperShared()
                                   XCB_ATOM_STRING,
                                   1024);
 #endif
-    if (key.isEmpty())
+    if (key.isEmpty()) {
+        qCDebug(dplatform) << "No wallpaper key found";
         return;
+    }
 
     if (m_sharedMemory != nullptr) {
         m_wallpaper = QImage();
@@ -300,7 +353,7 @@ void DBackingStoreProxy::updateWallpaperShared()
 
     m_sharedMemory = new QSharedMemory(key);
     if (!m_sharedMemory->attach()) {
-        qWarning() << "Unable to attach to shared memory segment.";
+        qCWarning(dplatform) << "Unable to attach to shared memory segment.";
         return;
     }
 

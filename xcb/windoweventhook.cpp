@@ -4,6 +4,7 @@
 
 // Fix compilation issue with multi-herited QXcbWindow since 6.6.2
 #include <QDebug>
+#include <QLoggingCategory>
 QT_BEGIN_NAMESPACE
 class QXcbWindow;
 class QPlatformWindow;
@@ -34,6 +35,12 @@ QT_END_NAMESPACE
 
 #include <X11/extensions/XI2proto.h>
 
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
+
 DPP_BEGIN_NAMESPACE
 
 PUBLIC_CLASS(QXcbWindow, WindowEventHook);
@@ -41,17 +48,21 @@ PUBLIC_CLASS(QDropEvent, WindowEventHook);
 
 void WindowEventHook::init(QXcbWindow *window, bool redirectContent)
 {
+    qCDebug(dxcb) << "Initializing WindowEventHook for window:" << window << "redirectContent:" << redirectContent;
     const Qt::WindowType &type = window->window()->type();
 
     if (redirectContent) {
+        qCDebug(dxcb) << "Overriding handleMapNotifyEvent for content redirection";
         VtableHook::overrideVfptrFun(window, &QXcbWindow::handleMapNotifyEvent,
                                      &WindowEventHook::handleMapNotifyEvent);
     }
 
+    qCDebug(dxcb) << "Overriding handleConfigureNotifyEvent";
     VtableHook::overrideVfptrFun(window, &QXcbWindow::handleConfigureNotifyEvent,
                                  &WindowEventHook::handleConfigureNotifyEvent);
 
     if (type == Qt::Widget || type == Qt::Window || type == Qt::Dialog) {
+        qCDebug(dxcb) << "Window type is Widget/Window/Dialog, overriding additional events";
         VtableHook::overrideVfptrFun(window, &QXcbWindow::handleClientMessageEvent,
                                      &WindowEventHook::handleClientMessageEvent);
         VtableHook::overrideVfptrFun(window, &QXcbWindow::handleFocusInEvent,
@@ -59,6 +70,7 @@ void WindowEventHook::init(QXcbWindow *window, bool redirectContent)
         VtableHook::overrideVfptrFun(window, &QXcbWindow::handleFocusOutEvent,
                                      &WindowEventHook::handleFocusOutEvent);
 #ifdef XCB_USE_XINPUT22
+        qCDebug(dxcb) << "Overriding handleXIEnterLeave for XInput2.2";
         VtableHook::overrideVfptrFun(window, &QXcbWindow::handleXIEnterLeave,
                                      &WindowEventHook::handleXIEnterLeave);
 #endif
@@ -72,9 +84,11 @@ void WindowEventHook::init(QXcbWindow *window, bool redirectContent)
     }
 
     if (type == Qt::Window) {
+        qCDebug(dxcb) << "Window type is Window, overriding handlePropertyNotifyEvent";
         VtableHook::overrideVfptrFun(window, &QXcbWindowEventListener::handlePropertyNotifyEvent,
                                      &WindowEventHook::handlePropertyNotifyEvent);
     }
+    qCDebug(dxcb) << "WindowEventHook initialization completed";
 }
 
 //#define DND_DEBUG
@@ -97,6 +111,7 @@ static inline xcb_window_t xcb_window(QWindow *w)
 
 xcb_atom_t toXdndAction(const QXcbDrag *drag, Qt::DropAction a)
 {
+    qCDebug(dxcb) << "Converting drop action to XDND action:" << a;
     switch (a) {
     case Qt::CopyAction:
         return drag->atom(QXcbAtom::D_QXCBATOM_WRAPPER(XdndActionCopy));
@@ -114,15 +129,18 @@ xcb_atom_t toXdndAction(const QXcbDrag *drag, Qt::DropAction a)
 
 void WindowEventHook::handleConfigureNotifyEvent(QXcbWindow *window, const xcb_configure_notify_event_t *event)
 {
+    qCDebug(dxcb) << "Handling configure notify event for window:" << window;
     DPlatformWindowHelper *helper = DPlatformWindowHelper::mapped.value(window);
 
     if (helper) {
+        qCDebug(dxcb) << "Found window helper, setting parent window";
         QWindowPrivate::get(window->window())->parentWindow = helper->m_frameWindow;
     }
 
     window->QXcbWindow::handleConfigureNotifyEvent(event);
 
     if (helper) {
+        qCDebug(dxcb) << "Restoring parent window and marking pixmap dirty";
         QWindowPrivate::get(window->window())->parentWindow = nullptr;
 
         if (helper->m_frameWindow->redirectContent())
@@ -132,17 +150,21 @@ void WindowEventHook::handleConfigureNotifyEvent(QXcbWindow *window, const xcb_c
 
 void WindowEventHook::handleMapNotifyEvent(QXcbWindow *window, const xcb_map_notify_event_t *event)
 {
+    qCDebug(dxcb) << "Handling map notify event for window:" << window;
     window->QXcbWindow::handleMapNotifyEvent(event);
 
     if (DFrameWindow *frame = qobject_cast<DFrameWindow*>(window->window())) {
+        qCDebug(dxcb) << "Window is DFrameWindow, marking pixmap dirty";
         frame->markXPixmapToDirty();
     } else if (DPlatformWindowHelper *helper = DPlatformWindowHelper::mapped.value(window)) {
+        qCDebug(dxcb) << "Found window helper, marking frame pixmap dirty";
         helper->m_frameWindow->markXPixmapToDirty();
     }
 }
 
 static Qt::DropAction toDropAction(QXcbConnection *c, xcb_atom_t a)
 {
+    qCDebug(dxcb) << "Converting XDND atom to drop action:" << a;
     if (a == c->atom(QXcbAtom::D_QXCBATOM_WRAPPER(XdndActionCopy)) || a == 0)
         return Qt::CopyAction;
     if (a == c->atom(QXcbAtom::D_QXCBATOM_WRAPPER(XdndActionLink)))
@@ -155,13 +177,16 @@ static Qt::DropAction toDropAction(QXcbConnection *c, xcb_atom_t a)
 
 void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_client_message_event_t *event)
 {
+    qCDebug(dxcb) << "Handling client message event for window:" << window << "type:" << event->type;
     if (event->format != 32) {
+        qCDebug(dxcb) << "Event format is not 32, delegating to original handler";
         return window->QXcbWindow::handleClientMessageEvent(event);
     }
 
     do {
         if (event->type != window->atom(QXcbAtom::D_QXCBATOM_WRAPPER(XdndPosition))
                 && event->type != window->atom(QXcbAtom::D_QXCBATOM_WRAPPER(XdndDrop))) {
+            qCDebug(dxcb) << "Event type is not XDND position or drop, delegating to original handler";
             break;
         }
 
@@ -169,6 +194,7 @@ void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_cli
 
         // 不处理自己的drag事件
         if (drag->currentDrag()) {
+            qCDebug(dxcb) << "Current drag exists, skipping own drag event";
             break;
         }
 
@@ -182,8 +208,10 @@ void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_cli
                                                                 window->connection()->atom(QXcbAtom::D_QXCBATOM_WRAPPER(XdndActionList)),
                                                                 XCB_ATOM_ATOM, offset, 1024);
             xcb_get_property_reply_t *reply = xcb_get_property_reply(xcb_connection, cookie, NULL);
-            if (!reply)
+            if (!reply) {
+                qCDebug(dxcb) << "No reply for XDND action list property";
                 break;
+            }
 
             remaining = 0;
 
@@ -203,6 +231,7 @@ void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_cli
         } while (remaining > 0);
 
         if (support_actions == Qt::IgnoreAction) {
+            qCDebug(dxcb) << "No supported drop actions, skipping XDND drop";
             break;
         }
 
@@ -214,6 +243,7 @@ void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_cli
 #endif
 
         if (!dropData) {
+            qCDebug(dxcb) << "Drop data is null, skipping XDND drop";
             return;
         }
 
@@ -271,27 +301,35 @@ void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_cli
         bool directSaveMode = dropData->hasFormat("XdndDirectSave0");
 
         dropData->setProperty("IsDirectSaveMode", directSaveMode);
+        qCDebug(dxcb) << "Direct save mode:" << directSaveMode;
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
         // Drop coming from another app? Update buttons.
-        if (!drag->currentDrag())
+        if (!drag->currentDrag()) {
+            qCDebug(dxcb) << "Updating mouse buttons for external drop";
             QGuiApplicationPrivate::mouse_buttons = window->connection()->queryMouseButtons();
+        }
 
+        qCDebug(dxcb) << "Handling drop with supported actions:" << supported_drop_actions;
         QPlatformDropQtResponse response = QWindowSystemInterface::handleDrop(drag->currentWindow.data(),
                                                                             dropData, drag->currentPosition,
                                                                               supported_drop_actions,
                                                                               QGuiApplication::mouseButtons(), QGuiApplication::keyboardModifiers());
 #else
+        qCDebug(dxcb) << "Handling drop with supported actions:" << supported_drop_actions;
         QPlatformDropQtResponse response = QWindowSystemInterface::handleDrop(drag->currentWindow.data(),
                                                                             dropData, drag->currentPosition,
                                                                               supported_drop_actions);
 #endif
         drag->setExecutedDropAction(response.acceptedAction());
+        qCDebug(dxcb) << "Drop action executed:" << response.acceptedAction();
 
         if (directSaveMode) {
+            qCDebug(dxcb) << "Processing direct save mode";
             const QUrl &url = dropData->property("DirectSaveUrl").toUrl();
 
             if (url.isValid() && drag->xdnd_dragsource) {
+                qCDebug(dxcb) << "Setting up direct save for URL:" << url;
                 xcb_atom_t XdndDirectSaveAtom = Utility::internAtom("XdndDirectSave0");
                 xcb_atom_t textAtom = Utility::internAtom("text/plain");
                 QByteArray basename = Utility::windowProperty(drag->xdnd_dragsource, XdndDirectSaveAtom, textAtom, 1024);
@@ -304,6 +342,7 @@ void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_cli
             }
         }
 
+        qCDebug(dxcb) << "Sending XDND finished event, accepted:" << response.isAccepted();
         xcb_client_message_event_t finished;
         finished.response_type = XCB_CLIENT_MESSAGE;
         finished.sequence = 0;
@@ -327,6 +366,7 @@ void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_cli
 
         // reset
         drag->target_time = XCB_CURRENT_TIME;
+        qCDebug(dxcb) << "XDND drop handling completed";
     } else {
         window->QXcbWindow::handleClientMessageEvent(event);
     }
@@ -334,40 +374,53 @@ void WindowEventHook::handleClientMessageEvent(QXcbWindow *window, const xcb_cli
 
 void WindowEventHook::handleFocusInEvent(QXcbWindow *window, const xcb_focus_in_event_t *event)
 {
+    qCDebug(dxcb) << "Handling focus in event for window:" << window << "detail:" << event->detail;
     // Ignore focus events that are being sent only because the pointer is over
     // our window, even if the input focus is in a different window.
-    if (event->detail == XCB_NOTIFY_DETAIL_POINTER)
+    if (event->detail == XCB_NOTIFY_DETAIL_POINTER) {
+        qCDebug(dxcb) << "Ignoring pointer detail focus event";
         return;
+    }
 
     QWindow *w = static_cast<QWindowPrivate *>(QObjectPrivate::get(window->window()))->eventReceiver();
 
     if (DFrameWindow *frame = qobject_cast<DFrameWindow*>(w)) {
+        qCDebug(dxcb) << "Window is DFrameWindow, using content window";
         if (frame->m_contentWindow)
             w = frame->m_contentWindow;
-        else
+        else {
+            qCDebug(dxcb) << "No content window, skipping focus event";
             return;
+        }
     }
 
+    qCDebug(dxcb) << "Calling original focus in event handler";
     VtableHook::callOriginalFun(window, &QXcbWindow::handleFocusInEvent, event);
 }
 
 void WindowEventHook::handleFocusOutEvent(QXcbWindow *window, const xcb_focus_out_event_t *event)
 {
+    qCDebug(dxcb) << "Handling focus out event for window:" << window << "mode:" << event->mode << "detail:" << event->detail;
     // Ignore focus events
     if (event->mode == XCB_NOTIFY_MODE_GRAB) {
+        qCDebug(dxcb) << "Ignoring grab mode focus event";
         return;
     }
 
     // Ignore focus events that are being sent only because the pointer is over
     // our window, even if the input focus is in a different window.
-    if (event->detail == XCB_NOTIFY_DETAIL_POINTER)
+    if (event->detail == XCB_NOTIFY_DETAIL_POINTER) {
+        qCDebug(dxcb) << "Ignoring pointer detail focus event";
         return;
+    }
 
+    qCDebug(dxcb) << "Calling original focus out event handler";
     VtableHook::callOriginalFun(window, &QXcbWindow::handleFocusOutEvent, event);
 }
 
 void WindowEventHook::handlePropertyNotifyEvent(QXcbWindowEventListener *el, const xcb_property_notify_event_t *event)
 {
+    qCDebug(dxcb) << "Handling property notify event for window:" << el << "atom:" << event->atom;
     DQXcbWindow *window = reinterpret_cast<DQXcbWindow*>(static_cast<QXcbWindow*>(el));
     QWindow *ww = window->window();
 
@@ -375,11 +428,13 @@ void WindowEventHook::handlePropertyNotifyEvent(QXcbWindowEventListener *el, con
 
     if (event->window == window->xcb_window()
             && event->atom == window->atom(QXcbAtom::D_QXCBATOM_WRAPPER(_NET_WM_STATE))) {
+        qCDebug(dxcb) << "Processing _NET_WM_STATE property change";
         QXcbWindow::NetWmStates states = window->netWmStates();
 
         ww->setProperty(netWmStates, (int)states);
 
         if (const DFrameWindow *frame = qobject_cast<DFrameWindow*>(ww)) {
+            qCDebug(dxcb) << "Window is DFrameWindow, setting property on content window";
             if (frame->m_contentWindow)
                 frame->m_contentWindow->setProperty(netWmStates, (int)states);
         }
@@ -389,6 +444,7 @@ void WindowEventHook::handlePropertyNotifyEvent(QXcbWindowEventListener *el, con
 #ifdef XCB_USE_XINPUT22
 static Qt::KeyboardModifiers translateModifiers(const QXcbKeyboard::_mod_masks &rmod_masks, int s)
 {
+    qCDebug(dxcb) << "Translating modifiers, state:" << s;
     Qt::KeyboardModifiers ret = Qt::KeyboardModifiers();
     if (s & XCB_MOD_MASK_SHIFT)
         ret |= Qt::ShiftModifier;
@@ -400,6 +456,7 @@ static Qt::KeyboardModifiers translateModifiers(const QXcbKeyboard::_mod_masks &
         ret |= Qt::MetaModifier;
     if (s & rmod_masks.altgr)
         ret |= Qt::GroupSwitchModifier;
+    qCDebug(dxcb) << "Translated modifiers:" << ret;
     return ret;
 }
 
@@ -410,6 +467,7 @@ static inline int fixed1616ToInt(FP1616 val)
 
 void WindowEventHook::handleXIEnterLeave(QXcbWindow *window, xcb_ge_event_t *event)
 {
+    qCDebug(dxcb) << "Handling XI enter/leave event for window:" << window;
     DQXcbWindow *me = reinterpret_cast<DQXcbWindow *>(window);
 
     xXIEnterEvent *ev = reinterpret_cast<xXIEnterEvent *>(event);
@@ -419,12 +477,15 @@ void WindowEventHook::handleXIEnterLeave(QXcbWindow *window, xcb_ge_event_t *eve
     QXcbWindow *mouseGrabber = me->connection()->mouseGrabber();
     if (mouseGrabber && mouseGrabber != me
             && (ev->evtype != XI_Leave || QGuiApplicationPrivate::currentMouseWindow != me->window())) {
+        qCDebug(dxcb) << "Ignoring XI event due to mouse grabber";
         return;
     }
 
     // Will send the press event repeatedly
     if (ev->evtype == XI_Enter && ev->mode == XCB_NOTIFY_MODE_UNGRAB) {
+        qCDebug(dxcb) << "Processing XI Enter event with ungrabbed mode";
         if (ev->buttons_len > 0) {
+            qCDebug(dxcb) << "Processing button state changes, buttons_len:" << ev->buttons_len;
 #if QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
             Qt::MouseButtons buttons = me->connection()->buttons();
 #else
@@ -453,6 +514,7 @@ void WindowEventHook::handleXIEnterLeave(QXcbWindow *window, xcb_ge_event_t *eve
 
                 if (buttons.testFlag(b)) {
                     if (!isSet) {
+                        qCDebug(dxcb) << "Handling button release event for button:" << b;
                         QGuiApplicationPrivate::lastCursorPosition = DHighDpi::fromNativePixels(QPointF(root_x, root_y), me->window());
                         me->handleButtonReleaseEvent(event_x, event_y, root_x, root_y,
                                                      0, modifiers, ev->time
@@ -477,6 +539,7 @@ void WindowEventHook::handleXIEnterLeave(QXcbWindow *window, xcb_ge_event_t *eve
         }
     }
 
+    qCDebug(dxcb) << "Calling original XI enter/leave event handler";
     me->QXcbWindow::handleXIEnterLeave(event);
 }
 
@@ -487,14 +550,17 @@ void WindowEventHook::windowEvent(QPlatformWindow *window, QEvent *event)
 bool WindowEventHook::windowEvent(QXcbWindow *window, QEvent *event)
 #endif
 {
+    qCDebug(dxcb) << "Handling window event, type:" << event->type();
     switch (event->type()) {
     case QEvent::DragEnter:
     case QEvent::DragMove:
     case QEvent::Drop: {
+        qCDebug(dxcb) << "Processing drag event:" << event->type();
         DQDropEvent *ev = static_cast<DQDropEvent*>(event);
         Qt::DropActions support_actions = qvariant_cast<Qt::DropActions>(ev->mimeData()->property("_d_dxcb_support_actions"));
 
         if (support_actions != Qt::IgnoreAction) {
+            qCDebug(dxcb) << "Setting supported drop actions:" << support_actions;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
             ev->m_actions = support_actions;
 #else
@@ -506,6 +572,7 @@ bool WindowEventHook::windowEvent(QXcbWindow *window, QEvent *event)
         break;
     }
 
+    qCDebug(dxcb) << "Calling original window event handler";
     return static_cast<QXcbWindow*>(window)->QXcbWindow::windowEvent(event);
 }
 #endif

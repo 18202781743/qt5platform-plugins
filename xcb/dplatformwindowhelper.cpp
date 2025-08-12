@@ -24,8 +24,15 @@
 #include <private/qeventpoint_p.h>
 #endif
 #include <qpa/qplatformcursor.h>
+#include <QLoggingCategory>
 
 #include <QPainterPath>
+
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
 
 Q_DECLARE_METATYPE(QPainterPath)
 Q_DECLARE_METATYPE(QMargins)
@@ -47,6 +54,7 @@ DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
     : QObject(window->window())
     , m_nativeWindow(window)
 {
+    qCDebug(dxcb) << "DPlatformWindowHelper constructor called, window:" << window;
     mapped[window] = this;
 
     m_frameWindow = new DFrameWindow(window->window());
@@ -71,6 +79,7 @@ DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
 
 #ifdef Q_OS_LINUX
     if (windowRedirectContent(window->window())) {
+        qCDebug(dxcb) << "Redirecting window content";
         xcb_composite_redirect_window(window->xcb_connection(), window->xcb_window(), XCB_COMPOSITE_REDIRECT_MANUAL);
         damage_id = xcb_generate_id(window->xcb_connection());
         xcb_damage_create(window->xcb_connection(), damage_id, window->xcb_window(), XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY);
@@ -192,16 +201,19 @@ QRect DPlatformWindowHelper::geometry() const
 
 QRect DPlatformWindowHelper::normalGeometry() const
 {
+    qCDebug(dxcb) << "normalGeometry called";
     return me()->m_frameWindow->handle()->normalGeometry();
 }
 
 QMargins DPlatformWindowHelper::frameMargins() const
 {
+    qCDebug(dxcb) << "frameMargins called";
     return me()->m_frameWindow->handle()->frameMargins();
 }
 
 QWindow *topvelWindow(QWindow *w)
 {
+    qCDebug(dxcb) << "topvelWindow called, window:" << w;
     QWindow *tw = w;
 
     while (tw->parent())
@@ -209,18 +221,23 @@ QWindow *topvelWindow(QWindow *w)
 
     DPlatformWindowHelper *helper = DPlatformWindowHelper::mapped.value(tw->handle());
 
-    return helper ? helper->m_frameWindow : tw;
+    QWindow *result = helper ? helper->m_frameWindow : tw;
+    qCDebug(dxcb) << "Top level window:" << result;
+    return result;
 }
 
 void DPlatformWindowHelper::setVisible(bool visible)
 {
+    qCDebug(dxcb) << "setVisible called, visible:" << visible;
     DPlatformWindowHelper *helper = me();
 
     if (visible) {
+        qCDebug(dxcb) << "Setting window visible";
         QWindow *tp = helper->m_nativeWindow->window()->transientParent();
         helper->m_nativeWindow->window()->setTransientParent(helper->m_frameWindow);
 
         if (tp) {
+            qCDebug(dxcb) << "Setting transient parent";
             QWindow *tw = topvelWindow(tp);
 
             if (tw != helper->m_frameWindow)
@@ -344,6 +361,7 @@ void DPlatformWindowHelper::setVisible(bool visible)
 
 void DPlatformWindowHelper::setWindowFlags(Qt::WindowFlags flags)
 {
+    qCDebug(dxcb) << "Setting window flags:" << flags;
     me()->m_frameWindow->setFlags((flags | Qt::FramelessWindowHint | Qt::CustomizeWindowHint | Qt::NoDropShadowWindowHint) & ~Qt::WindowMinMaxButtonsHint);
     window()->QNativeWindow::setWindowFlags(flags);
 }
@@ -354,15 +372,19 @@ void DPlatformWindowHelper::setWindowState(Qt::WindowState state)
 void DPlatformWindowHelper::setWindowState(Qt::WindowStates state)
 #endif
 {
+    qCDebug(dxcb) << "Setting window state:" << state;
 #ifdef Q_OS_LINUX
     DQNativeWindow *window = static_cast<DQNativeWindow*>(me()->m_frameWindow->handle());
 
-    if (window->m_windowState == state)
+    if (window->m_windowState == state) {
+        qCDebug(dxcb) << "Window state already set to:" << state;
         return;
+    }
 
     if (state == Qt::WindowMinimized
             && (window->m_windowState == Qt::WindowMaximized
                 || window->m_windowState == Qt::WindowFullScreen)) {
+        qCDebug(dxcb) << "Minimizing window from maximized/fullscreen state";
 #if QT_VERSION < QT_VERSION_CHECK(5, 12, 1)
         window->changeNetWmState(true, Utility::internAtom("_NET_WM_STATE_HIDDEN"));
 #else
@@ -376,6 +398,7 @@ void DPlatformWindowHelper::setWindowState(Qt::WindowStates state)
     } else
 #endif
     {
+        qCDebug(dxcb) << "Setting window state directly";
 #if QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
         me()->m_frameWindow->setWindowState(state);
 #else
@@ -386,63 +409,75 @@ void DPlatformWindowHelper::setWindowState(Qt::WindowStates state)
 
 WId DPlatformWindowHelper::winId() const
 {
+    qCDebug(dxcb) << "Getting window ID";
     return me()->m_frameWindow->handle()->winId();
 }
 
 void DPlatformWindowHelper::setParent(const QPlatformWindow *window)
 {
+    qCDebug(dxcb) << "Setting window parent:" << window;
     me()->m_frameWindow->handle()->setParent(window);
 }
 
 void DPlatformWindowHelper::setWindowTitle(const QString &title)
 {
+    qCDebug(dxcb) << "Setting window title:" << title;
     me()->m_frameWindow->handle()->setWindowTitle(title);
 }
 
 void DPlatformWindowHelper::setWindowFilePath(const QString &title)
 {
+    qCDebug(dxcb) << "Setting window file path:" << title;
     me()->m_frameWindow->handle()->setWindowFilePath(title);
 }
 
 void DPlatformWindowHelper::setWindowIcon(const QIcon &icon)
 {
+    qCDebug(dxcb) << "Setting window icon";
     me()->m_frameWindow->handle()->setWindowIcon(icon);
 }
 
 void DPlatformWindowHelper::raise()
 {
+    qCDebug(dxcb) << "Raising window";
     me()->m_frameWindow->handle()->raise();
 }
 
 void DPlatformWindowHelper::lower()
 {
+    qCDebug(dxcb) << "Lowering window";
     me()->m_frameWindow->handle()->lower();
 }
 
 bool DPlatformWindowHelper::isExposed() const
 {
+    qCDebug(dxcb) << "Checking if window is exposed";
     return me()->m_frameWindow->handle()->isExposed();
 }
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
 bool DPlatformWindowHelper::isEmbedded() const
 {
+    qCDebug(dxcb) << "Checking if window is embedded";
     return me()->m_frameWindow->handle()->isEmbedded();
 }
 #else
 bool DPlatformWindowHelper::isEmbedded(const QPlatformWindow *parentWindow) const
 {
+    qCDebug(dxcb) << "Checking if window is embedded with parent:" << parentWindow;
     return me()->m_frameWindow->handle()->isEmbedded(parentWindow);
 }
 #endif
 
 void DPlatformWindowHelper::propagateSizeHints()
 {
+    qCDebug(dxcb) << "Propagating size hints";
     me()->updateSizeHints();
 
     const QWindow *window = this->window()->window();
 
     if (window->maximumSize() == window->minimumSize()) {
+        qCDebug(dxcb) << "Window has fixed size, updating motif hints";
         Utility::QtMotifWmHints cw_hints = Utility::getMotifWmHints(this->window()->QNativeWindow::winId());
 
         cw_hints.flags |= DXcbWMSupport::MWM_HINTS_DECORATIONS;
@@ -461,11 +496,13 @@ void DPlatformWindowHelper::propagateSizeHints()
 
 void DPlatformWindowHelper::setOpacity(qreal level)
 {
+    qCDebug(dxcb) << "Setting window opacity:" << level;
     me()->m_frameWindow->setOpacity(level);
 }
 
 void DPlatformWindowHelper::requestActivateWindow()
 {
+    qCDebug(dxcb) << "Requesting window activation";
     DPlatformWindowHelper *helper = me();
 
 #ifdef Q_OS_LINUX
@@ -494,33 +531,39 @@ void DPlatformWindowHelper::requestActivateWindow()
 
 bool DPlatformWindowHelper::setKeyboardGrabEnabled(bool grab)
 {
+    qCDebug(dxcb) << "Setting keyboard grab enabled:" << grab;
     return me()->m_frameWindow->handle()->setKeyboardGrabEnabled(grab);
 }
 
 bool DPlatformWindowHelper::setMouseGrabEnabled(bool grab)
 {
+    qCDebug(dxcb) << "Setting mouse grab enabled:" << grab;
     return me()->m_frameWindow->handle()->setMouseGrabEnabled(grab);
 }
 
 bool DPlatformWindowHelper::setWindowModified(bool modified)
 {
+    qCDebug(dxcb) << "Setting window modified:" << modified;
     return me()->m_frameWindow->handle()->setWindowModified(modified);
 }
 
 #if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
 bool DPlatformWindowHelper::startSystemResize(const QPoint &pos, Qt::Corner corner)
 {
+    qCDebug(dxcb) << "Starting system resize at position:" << pos << "corner:" << corner;
     return me()->m_frameWindow->handle()->startSystemResize(pos, corner);
 }
 #else
 bool DPlatformWindowHelper::startSystemResize(Qt::Edges edges)
 {
+    qCDebug(dxcb) << "Starting system resize with edges:" << edges;
     return me()->m_frameWindow->handle()->startSystemResize(edges);
 }
 #endif
 
 void DPlatformWindowHelper::setFrameStrutEventsEnabled(bool enabled)
 {
+    qCDebug(dxcb) << "Setting frame strut events enabled:" << enabled;
     me()->m_frameWindow->handle()->setFrameStrutEventsEnabled(enabled);
 }
 
@@ -531,6 +574,7 @@ bool DPlatformWindowHelper::frameStrutEventsEnabled() const
 
 void DPlatformWindowHelper::setAlertState(bool enabled)
 {
+    qCDebug(dxcb) << "Setting alert state:" << enabled;
     me()->m_frameWindow->handle()->setAlertState(enabled);
 }
 
@@ -541,12 +585,15 @@ bool DPlatformWindowHelper::isAlertState() const
 
 bool DPlatformWindowHelper::windowRedirectContent(QWindow *window)
 {
+    qCDebug(dxcb) << "Checking window redirect content for window:" << window;
     // 环境变量的值最优先
     static const QByteArray env = qgetenv("DXCB_REDIRECT_CONTENT");
 
     if (env == "true") {
+        qCDebug(dxcb) << "Redirect content enabled by environment variable";
         return true;
     } else if (env == "false") {
+        qCDebug(dxcb) << "Redirect content disabled by environment variable";
         return false;
     }
 
@@ -571,17 +618,21 @@ bool DPlatformWindowHelper::windowRedirectContent(QWindow *window)
 
 bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
 {
+    qCDebug(dxcb) << "Event filter called, watched:" << watched << "event type:" << event->type();
     if (watched == m_frameWindow) {
         switch ((int)event->type()) {
         case QEvent::Close:
+            qCDebug(dxcb) << "Handling close event";
             m_nativeWindow->window()->close();
             return true;
         case QEvent::KeyPress:
         case QEvent::KeyRelease:
         case QEvent::WindowDeactivate:
+            qCDebug(dxcb) << "Handling key/window deactivate event";
             QCoreApplication::sendEvent(m_nativeWindow->window(), event);
             return true;
         case QEvent::Move: {
+            qCDebug(dxcb) << "Handling move event";
             QRect geometry = m_frameWindow->handle()->geometry();
 
             if (geometry.topLeft() != QPoint(0, 0) || geometry.size() != QSize(0, 0)) {
@@ -594,6 +645,7 @@ bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
             return true;
         }
         case QEvent::FocusIn:
+            qCDebug(dxcb) << "Handling focus in event";
 #if QT_VERSION < QT_VERSION_CHECK(6, 7, 0)
             QWindowSystemInterface::handleWindowActivated(m_nativeWindow->window(), static_cast<QFocusEvent*>(event)->reason());
 #else
@@ -601,6 +653,7 @@ bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
 #endif
             return true;
         case QEvent::WindowActivate:
+            qCDebug(dxcb) << "Handling window activate event";
 #if QT_VERSION < QT_VERSION_CHECK(6, 7, 0)
             QWindowSystemInterface::handleWindowActivated(m_nativeWindow->window(), Qt::OtherFocusReason);
 #else
@@ -608,12 +661,14 @@ bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
 #endif
             return true;
         case QEvent::Resize: {
+            qCDebug(dxcb) << "Handling resize event";
             updateContentWindowGeometry();
             break;
         }
         case QEvent::MouseButtonPress:
         case QEvent::MouseButtonRelease:
         case QEvent::MouseMove: {
+            qCDebug(dxcb) << "Handling mouse event";
             DQMouseEvent *e = static_cast<DQMouseEvent*>(event);
             const QRectF rectF(m_windowValidGeometry);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -626,6 +681,7 @@ bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
             if (!qFuzzyCompare(posF.x(), rectF.width())
                     && !qFuzzyCompare(posF.y(), rectF.height())
                     && rectF.contains(posF)) {
+                qCDebug(dxcb) << "Mouse event within valid geometry, forwarding to native window";
                 m_frameWindow->unsetCursor();
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
                 e->l = e->w = m_nativeWindow->window()->mapFromGlobal(e->globalPos());
@@ -647,6 +703,8 @@ bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
                 }
 #endif
                 return true;
+            } else {
+                qCDebug(dxcb) << "Mouse event outside valid geometry, not forwarding";
             }
 
             break;
@@ -834,6 +892,7 @@ bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
 
 void DPlatformWindowHelper::setNativeWindowGeometry(const QRect &rect, bool onlyResize)
 {
+    qCDebug(dxcb) << "Setting native window geometry:" << rect << "onlyResize:" << onlyResize;
     qt_window_private(m_nativeWindow->window())->parentWindow = m_frameWindow;
     qt_window_private(m_nativeWindow->window())->positionAutomatic = onlyResize;
     // 对于非顶层窗口，Qt会根据新的geometry获取窗口所在屏幕，并将屏幕设置给此窗口
@@ -849,28 +908,37 @@ void DPlatformWindowHelper::setNativeWindowGeometry(const QRect &rect, bool only
 
 void DPlatformWindowHelper::updateClipPathByWindowRadius(const QSize &windowSize)
 {
+    qCDebug(dxcb) << "Updating clip path by window radius, size:" << windowSize;
     if (!m_isUserSetClipPath) {
+        qCDebug(dxcb) << "User clip path not set, updating automatically";
         // 第二个参数传递true，强制更新模糊区域
         setWindowValidGeometry(QRect(QPoint(0, 0), windowSize), true);
 
         int window_radius = getWindowRadius();
+        qCDebug(dxcb) << "Window radius:" << window_radius;
 
         QPainterPath path;
 
         path.addRoundedRect(m_windowValidGeometry, window_radius, window_radius);
 
         setClipPath(path);
+    } else {
+        qCDebug(dxcb) << "User clip path is set, skipping automatic update";
     }
 }
 
 void DPlatformWindowHelper::setClipPath(const QPainterPath &path)
 {
-    if (m_clipPath == path)
+    qCDebug(dxcb) << "Setting clip path";
+    if (m_clipPath == path) {
+        qCDebug(dxcb) << "Clip path unchanged, skipping update";
         return;
+    }
 
     m_clipPath = path;
 
     if (m_isUserSetClipPath) {
+        qCDebug(dxcb) << "User clip path set, updating window valid geometry";
         setWindowValidGeometry(m_clipPath.boundingRect().toRect() & QRect(QPoint(0, 0), m_nativeWindow->window()->size()));
     }
 
@@ -881,10 +949,14 @@ void DPlatformWindowHelper::setClipPath(const QPainterPath &path)
 
 void DPlatformWindowHelper::setWindowValidGeometry(const QRect &geometry, bool force)
 {
-    if (!force && geometry == m_windowValidGeometry)
+    qCDebug(dxcb) << "Setting window valid geometry:" << geometry << "force:" << force;
+    if (!force && geometry == m_windowValidGeometry) {
+        qCDebug(dxcb) << "Window valid geometry unchanged, skipping update";
         return;
+    }
 
     m_windowValidGeometry = geometry;
+    qCDebug(dxcb) << "Window valid geometry updated to:" << m_windowValidGeometry;
 
     // The native window geometry may not update now, we need to wait for resize
     // event to proceed.
@@ -1023,6 +1095,7 @@ bool DPlatformWindowHelper::updateWindowBlurAreasForWM()
 
 void DPlatformWindowHelper::updateSizeHints()
 {
+    qCDebug(dxcb) << "Updating size hints";
     const QMargins &content_margins = m_frameWindow->contentMarginsHint();
     const QSize extra_size(content_margins.left() + content_margins.right(),
                            content_margins.top() + content_margins.bottom());
@@ -1038,20 +1111,25 @@ void DPlatformWindowHelper::updateSizeHints()
 
 void DPlatformWindowHelper::updateContentPathForFrameWindow()
 {
+    qCDebug(dxcb) << "updateContentPathForFrameWindow called, m_isUserSetClipPath:" << m_isUserSetClipPath;
     if (m_isUserSetClipPath) {
+        qCDebug(dxcb) << "Setting content path from user clip path";
         m_frameWindow->setContentPath(m_clipPath);
     } else {
+        qCDebug(dxcb) << "Setting content rounded rect";
         m_frameWindow->setContentRoundedRect(m_windowValidGeometry, getWindowRadius());
     }
 }
 
 void DPlatformWindowHelper::updateContentWindowGeometry()
 {
+    qCDebug(dxcb) << "updateContentWindowGeometry called";
     const auto windowRatio = m_nativeWindow->window()->devicePixelRatio();
     const auto &contentMargins = m_frameWindow->contentMarginsHint();
     const auto &contentPlatformMargins = contentMargins * windowRatio;
     const QSize &size = m_frameWindow->handle()->geometry().marginsRemoved(contentPlatformMargins).size();
 
+    qCDebug(dxcb) << "Window ratio:" << windowRatio << "content margins:" << contentMargins << "size:" << size;
     // update the content window geometry
     setNativeWindowGeometry(QRect(contentPlatformMargins.left(),
                                   contentPlatformMargins.top(),
@@ -1109,6 +1187,7 @@ void DPlatformWindowHelper::updateWindowShape()
 
 int DPlatformWindowHelper::getWindowRadius() const
 {
+    qCDebug(dxcb) << "Getting window radius";
 //#ifdef Q_OS_LINUX
 //    QNativeWindow::NetWmStates states = static_cast<DQNativeWindow*>(m_frameWindow->handle())->netWmStates();
 
@@ -1119,24 +1198,35 @@ int DPlatformWindowHelper::getWindowRadius() const
 //    }
 //#else
     if (m_frameWindow->windowState() == Qt::WindowFullScreen
-            || m_frameWindow->windowState() == Qt::WindowMaximized)
+            || m_frameWindow->windowState() == Qt::WindowMaximized) {
+        qCDebug(dxcb) << "Window is fullscreen or maximized, returning 0 radius";
         return 0;
+    }
 //#endif
 
-    return (m_isUserSetWindowRadius || DWMSupport::instance()->hasWindowAlpha()) ? m_windowRadius : 0;
+    const int radius = (m_isUserSetWindowRadius || DWMSupport::instance()->hasWindowAlpha()) ? m_windowRadius : 0;
+    qCDebug(dxcb) << "Window radius:" << radius;
+    return radius;
 }
 
 int DPlatformWindowHelper::getShadowRadius() const
 {
-    return DWMSupport::instance()->hasWindowAlpha() ? m_shadowRadius : 0;
+    const int radius = DWMSupport::instance()->hasWindowAlpha() ? m_shadowRadius : 0;
+    qCDebug(dxcb) << "Getting shadow radius:" << radius;
+    return radius;
 }
 
 int DPlatformWindowHelper::getBorderWidth() const
 {
-    if (m_isUserSetBorderWidth || DWMSupport::instance()->hasWindowAlpha())
+    qCDebug(dxcb) << "Getting border width";
+    if (m_isUserSetBorderWidth || DWMSupport::instance()->hasWindowAlpha()) {
+        qCDebug(dxcb) << "User set border width or window has alpha, returning:" << m_borderWidth;
         return m_borderWidth;
+    }
 
-    return m_frameWindow->canResize() ? 2 : m_borderWidth;
+    const int width = m_frameWindow->canResize() ? 2 : m_borderWidth;
+    qCDebug(dxcb) << "Border width:" << width;
+    return width;
 }
 
 static QColor colorBlend(const QColor &color1, const QColor &color2)
@@ -1158,16 +1248,20 @@ static QColor colorBlend(const QColor &color1, const QColor &color2)
 
 QColor DPlatformWindowHelper::getBorderColor() const
 {
-    return DWMSupport::instance()->hasWindowAlpha() ? m_borderColor : colorBlend(QColor("#e0e0e0"), m_borderColor);
+    qCDebug(dxcb) << "Getting border color";
+    const QColor color = DWMSupport::instance()->hasWindowAlpha() ? m_borderColor : colorBlend(QColor("#e0e0e0"), m_borderColor);
+    qCDebug(dxcb) << "Border color:" << color;
+    return color;
 }
 
 void DPlatformWindowHelper::updateWindowRadiusFromProperty()
 {
+    qCDebug(dxcb) << "Updating window radius from property";
     const QVariant &v = m_nativeWindow->window()->property(windowRadius);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Window radius property not set, setting default value";
         m_nativeWindow->window()->setProperty(windowRadius, getWindowRadius());
-
         return;
     }
 
@@ -1175,21 +1269,25 @@ void DPlatformWindowHelper::updateWindowRadiusFromProperty()
     int radius = v.toInt(&ok);
 
     if (ok && radius != m_windowRadius) {
+        qCDebug(dxcb) << "Window radius changed from" << m_windowRadius << "to" << radius;
         m_windowRadius = radius;
         m_isUserSetWindowRadius = true;
         m_isUserSetClipPath = false;
 
         updateClipPathByWindowRadius(m_nativeWindow->window()->size());
+    } else {
+        qCDebug(dxcb) << "Window radius unchanged:" << radius;
     }
 }
 
 void DPlatformWindowHelper::updateBorderWidthFromProperty()
 {
+    qCDebug(dxcb) << "Updating border width from property";
     const QVariant &v = m_nativeWindow->window()->property(borderWidth);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Border width property not set, setting default value";
         m_nativeWindow->window()->setProperty(borderWidth, getBorderWidth());
-
         return;
     }
 
@@ -1197,9 +1295,12 @@ void DPlatformWindowHelper::updateBorderWidthFromProperty()
     int width = v.toInt(&ok);
 
     if (ok && width != m_borderWidth) {
+        qCDebug(dxcb) << "Border width changed from" << m_borderWidth << "to" << width;
         m_borderWidth = width;
         m_isUserSetBorderWidth = true;
         m_frameWindow->setBorderWidth(width);
+    } else {
+        qCDebug(dxcb) << "Border width unchanged:" << width;
     }
 }
 

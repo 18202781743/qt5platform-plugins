@@ -22,6 +22,7 @@
 #include <QVariantAnimation>
 #include <QTimer>
 #include <QDebug>
+#include <QLoggingCategory>
 
 #if QT_VERSION < QT_VERSION_CHECK(5, 4, 0)
 #include <private/qwidgetwindow_qpa_p.h>
@@ -51,6 +52,12 @@
 #include <qpa/qplatformcursor.h>
 #include <qpa/qplatformnativeinterface.h>
 
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
+
 DPP_BEGIN_NAMESPACE
 
 PUBLIC_CLASS(QMouseEvent, WindowEventListener);
@@ -70,6 +77,7 @@ public:
         : QObject(0)
         , m_store(store)
     {
+        qCDebug(dxcb) << "WindowEventListener constructor called";
         cursorAnimation.setDuration(50);
         cursorAnimation.setEasingCurve(QEasingCurve::InExpo);
 
@@ -85,13 +93,16 @@ public:
 
     ~WindowEventListener()
     {
+        qCDebug(dxcb) << "WindowEventListener destructor called";
         const QWidgetWindow *widgetWindow = m_store->widgetWindow();
 
         QWidget *widget = widgetWindow->widget();
 
         if (widget) {
+            qCDebug(dxcb) << "Clearing ghost vtable for widget";
             VtableHook::clearGhostVtable(widget);
         } else {
+            qCDebug(dxcb) << "Clearing ghost vtable for window";
             VtableHook::clearGhostVtable(m_store->window());
         }
     }
@@ -99,26 +110,33 @@ public:
 public slots:
     void updateWindowBlurAreasForWM()
     {
+        qCDebug(dxcb) << "updateWindowBlurAreasForWM called";
         m_store->updateWindowBlurAreasForWM();
     }
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) Q_DECL_OVERRIDE
     {
+        qCDebug(dxcb) << "eventFilter called, event type:" << event->type();
         QWindow *window = qobject_cast<QWindow*>(obj);
 
-        if (!window)
+        if (!window) {
+            qCDebug(dxcb) << "Object is not a QWindow";
             return false;
+        }
 
         const QRect &window_geometry = window->geometry();
 //        qDebug() << obj << event->type() << window_geometry;
 
         switch ((int)event->type()) {
         case QEvent::Wheel: {
+            qCDebug(dxcb) << "Wheel event received";
             DQWheelEvent *e = static_cast<DQWheelEvent*>(event);
 
-            if (!window_geometry.contains(e->globalPos()))
+            if (!window_geometry.contains(e->globalPos())) {
+                qCDebug(dxcb) << "Wheel event outside window geometry";
                 return true;
+            }
 
             e->p -= m_store->windowOffset() / window->devicePixelRatio();
 
@@ -128,9 +146,11 @@ protected:
         case QEvent::MouseButtonDblClick:
         case QEvent::MouseButtonPress:
         case QEvent::MouseButtonRelease: {
+            qCDebug(dxcb) << "Mouse event received, type:" << event->type();
             DQMouseEvent *e = static_cast<DQMouseEvent*>(event);
 
             if (Q_LIKELY(e->source() != Qt::MouseEventSynthesizedByQt)) {
+                qCDebug(dxcb) << "Adjusting mouse event coordinates";
                 e->l -= m_store->windowOffset() / window->devicePixelRatio();
                 e->w -= m_store->windowOffset() / window->devicePixelRatio();
             }
@@ -991,6 +1011,7 @@ void DPlatformBackingStore::initUserProperties()
 
 bool DPlatformBackingStore::updateWindowMargins(bool repaintShadow)
 {
+    qCDebug(dxcb) << "Updating window margins, repaint shadow:" << repaintShadow;
     Qt::WindowState state = window()->windowState();
 
     const QMargins old_margins = windowMargins;
@@ -1018,6 +1039,7 @@ bool DPlatformBackingStore::updateWindowMargins(bool repaintShadow)
 
 void DPlatformBackingStore::updateFrameExtents()
 {
+    qCDebug(dxcb) << "Updating frame extents";
     QMargins extentsMargins = windowMargins;
 
     if (canUseClipPath() && !isUserSetClipPath) {
@@ -1029,8 +1051,11 @@ void DPlatformBackingStore::updateFrameExtents()
 
 void DPlatformBackingStore::updateInputShapeRegion()
 {
-    if (!windowGeometry().isValid())
+    qCDebug(dxcb) << "Updating input shape region";
+    if (!windowGeometry().isValid()) {
+        qCDebug(dxcb) << "Window geometry is not valid, skipping input shape update";
         return;
+    }
 
     int mouse_margins;
 
@@ -1074,6 +1099,7 @@ void DPlatformBackingStore::updateInputShapeRegion()
 
 void DPlatformBackingStore::updateWindowRadius()
 {
+    qCDebug(dxcb) << "Updating window radius";
     const QVariant &v = window()->property(windowRadius);
 
     if (!v.isValid()) {
@@ -1095,11 +1121,12 @@ void DPlatformBackingStore::updateWindowRadius()
 
 void DPlatformBackingStore::updateBorderWidth()
 {
+    qCDebug(dxcb) << "Updating border width";
     const QVariant &v = window()->property(borderWidth);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Border width property not set, setting default value";
         window()->setProperty(borderWidth, m_borderWidth);
-
         return;
     }
 
@@ -1107,39 +1134,48 @@ void DPlatformBackingStore::updateBorderWidth()
     int width = v.toInt(&ok);
 
     if (ok && width != m_borderWidth) {
+        qCDebug(dxcb) << "Border width changed from" << m_borderWidth << "to" << width;
         m_borderWidth = width;
 
         updateFrameExtents();
 
         if (!updateWindowMargins())
             doDelayedUpdateWindowShadow();
+    } else {
+        qCDebug(dxcb) << "Border width unchanged:" << width;
     }
 }
 
 void DPlatformBackingStore::updateBorderColor()
 {
+    qCDebug(dxcb) << "Updating border color";
     const QVariant &v = window()->property(borderColor);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Border color property not set, setting default value";
         window()->setProperty(borderColor, m_borderColor);
-
         return;
     }
 
     const QColor &color = qvariant_cast<QColor>(v);
 
     if (color.isValid() && m_borderColor != color) {
+        qCDebug(dxcb) << "Border color changed from" << m_borderColor << "to" << color;
         m_borderColor = color;
 
         doDelayedUpdateWindowShadow();
+    } else {
+        qCDebug(dxcb) << "Border color unchanged:" << color;
     }
 }
 
 void DPlatformBackingStore::updateUserClipPath()
 {
+    qCDebug(dxcb) << "Updating user clip path";
     const QVariant &v = window()->property(clipPath);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Clip path property not set";
         return;
     }
 
@@ -1147,53 +1183,71 @@ void DPlatformBackingStore::updateUserClipPath()
 
     path = qvariant_cast<QPainterPath>(v);
 
-    if (!isUserSetClipPath && path.isEmpty())
+    if (!isUserSetClipPath && path.isEmpty()) {
+        qCDebug(dxcb) << "User clip path not set and path is empty";
         return;
+    }
 
     isUserSetClipPath = !path.isEmpty();
+    qCDebug(dxcb) << "User clip path set:" << isUserSetClipPath;
 
-    if (path.isEmpty())
+    if (path.isEmpty()) {
+        qCDebug(dxcb) << "Path is empty, updating clip path";
         updateClipPath();
-    else
+    } else {
+        qCDebug(dxcb) << "Setting clip path with device pixel ratio";
         setClipPah(path * window()->devicePixelRatio());
+    }
 }
 
 void DPlatformBackingStore::updateClipPath()
 {
+    qCDebug(dxcb) << "Updating clip path";
     if (!isUserSetClipPath) {
+        qCDebug(dxcb) << "User clip path not set, creating automatic path";
         QPainterPath path;
 
-        if (canUseClipPath())
+        if (canUseClipPath()) {
+            qCDebug(dxcb) << "Using rounded rectangle clip path";
             path.addRoundedRect(QRect(QPoint(0, 0), m_windowSize), getWindowRadius(), getWindowRadius());
-        else
+        } else {
+            qCDebug(dxcb) << "Using rectangular clip path";
             path.addRect(0, 0, m_windowSize.width(), m_windowSize.height());
+        }
 
         setClipPah(path);
+    } else {
+        qCDebug(dxcb) << "User clip path is set, skipping automatic update";
     }
 }
 
 void DPlatformBackingStore::updateFrameMask()
 {
+    qCDebug(dxcb) << "Updating frame mask";
     const QVariant &v = window()->property(frameMask);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Frame mask property not set";
         return;
     }
 
     QRegion region = qvariant_cast<QRegion>(v);
+    qCDebug(dxcb) << "Frame mask region:" << region;
 
     static_cast<QXcbWindow*>(window()->handle())->QXcbWindow::setMask(region * window()->devicePixelRatio());
 
     isUserSetFrameMask = !region.isEmpty();
+    qCDebug(dxcb) << "User set frame mask:" << isUserSetFrameMask;
 }
 
 void DPlatformBackingStore::updateShadowRadius()
 {
+    qCDebug(dxcb) << "Updating shadow radius";
     const QVariant &v = window()->property(shadowRadius);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Shadow radius property not set, setting default value";
         window()->setProperty(shadowRadius, m_shadowRadius);
-
         return;
     }
 
@@ -1201,137 +1255,170 @@ void DPlatformBackingStore::updateShadowRadius()
     int radius = qMax(v.toInt(&ok), 0);
 
     if (ok && radius != m_shadowRadius) {
+        qCDebug(dxcb) << "Shadow radius changed from" << m_shadowRadius << "to" << radius;
         m_shadowRadius = radius;
 
         updateWindowMargins();
 
         if (m_enableShadow)
             doDelayedUpdateWindowShadow();
+    } else {
+        qCDebug(dxcb) << "Shadow radius unchanged:" << radius;
     }
 }
 
 void DPlatformBackingStore::updateShadowOffset()
 {
+    qCDebug(dxcb) << "Updating shadow offset";
     const QVariant &v = window()->property(shadowOffset);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Shadow offset property not set, setting default value";
         window()->setProperty(shadowOffset, m_shadowOffset);
-
         return;
     }
 
     const QPoint &offset = v.toPoint();
 
     if (offset != m_shadowOffset) {
+        qCDebug(dxcb) << "Shadow offset changed from" << m_shadowOffset << "to" << offset;
         m_shadowOffset = offset;
 
         updateWindowMargins();
 
         if (m_enableShadow)
             doDelayedUpdateWindowShadow();
+    } else {
+        qCDebug(dxcb) << "Shadow offset unchanged:" << offset;
     }
 }
 
 void DPlatformBackingStore::updateShadowColor()
 {
+    qCDebug(dxcb) << "Updating shadow color";
     const QVariant &v = window()->property(shadowColor);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Shadow color property not set, setting default value";
         window()->setProperty(shadowColor, m_shadowColor);
-
         return;
     }
 
     const QColor &color = qvariant_cast<QColor>(v);
 
     if (color.isValid() && m_shadowColor != color) {
+        qCDebug(dxcb) << "Shadow color changed from" << m_shadowColor << "to" << color;
         m_shadowColor = color;
 
         if (m_enableShadow)
             doDelayedUpdateWindowShadow();
+    } else {
+        qCDebug(dxcb) << "Shadow color unchanged:" << color;
     }
 }
 
 void DPlatformBackingStore::updateTranslucentBackground()
 {
+    qCDebug(dxcb) << "Updating translucent background";
     const QVariant &v = window()->property(translucentBackground);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Translucent background property not set, setting default value";
         window()->setProperty(translucentBackground, m_translucentBackground);
-
         return;
     }
 
-    m_translucentBackground = v.toBool();
+    const bool translucent = v.toBool();
+    qCDebug(dxcb) << "Translucent background changed from" << m_translucentBackground << "to" << translucent;
+    m_translucentBackground = translucent;
 }
 
 void DPlatformBackingStore::updateEnableSystemResize()
 {
+    qCDebug(dxcb) << "Updating enable system resize";
     const QVariant &v = window()->property(enableSystemResize);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Enable system resize property not set, setting default value";
         window()->setProperty(enableSystemResize, m_enableSystemResize);
-
         return;
     }
 
-    if (m_enableSystemResize == v.toBool())
+    const bool enable = v.toBool();
+    if (m_enableSystemResize == enable) {
+        qCDebug(dxcb) << "Enable system resize unchanged:" << enable;
         return;
+    }
 
-    m_enableSystemResize = v.toBool();
+    qCDebug(dxcb) << "Enable system resize changed from" << m_enableSystemResize << "to" << enable;
+    m_enableSystemResize = enable;
 
     updateInputShapeRegion();
 }
 
 void DPlatformBackingStore::updateEnableSystemMove()
 {
+    qCDebug(dxcb) << "Updating enable system move";
     const QVariant &v = window()->property(enableSystemMove);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Enable system move property not set, setting default value";
         window()->setProperty(enableSystemMove, m_enableSystemMove);
-
         return;
     }
 
-    m_enableSystemMove = v.toBool();
+    const bool enable = v.toBool();
+    qCDebug(dxcb) << "Enable system move changed from" << m_enableSystemMove << "to" << enable;
+    m_enableSystemMove = enable;
 }
 
 void DPlatformBackingStore::updateEnableBlurWindow()
 {
+    qCDebug(dxcb) << "Updating enable blur window";
     const QVariant &v = window()->property(enableBlurWindow);
 
     if (!v.isValid()) {
+        qCDebug(dxcb) << "Enable blur window property not set, setting default value";
         window()->setProperty(enableBlurWindow, m_enableBlurWindow);
-
         return;
     }
 
-    if (m_enableBlurWindow != v.toBool()) {
-        m_enableBlurWindow = v.toBool();
+    const bool enable = v.toBool();
+    if (m_enableBlurWindow != enable) {
+        qCDebug(dxcb) << "Enable blur window changed from" << m_enableBlurWindow << "to" << enable;
+        m_enableBlurWindow = enable;
 
 #ifdef Q_OS_LINUX
         if (m_enableBlurWindow) {
+            qCDebug(dxcb) << "Connecting window manager changed signal";
             QObject::connect(DXcbWMSupport::instance(), &DXcbWMSupport::windowManagerChanged,
                              m_eventListener, &WindowEventListener::updateWindowBlurAreasForWM);
         } else {
+            qCDebug(dxcb) << "Disconnecting window manager changed signal";
             QObject::disconnect(DXcbWMSupport::instance(), &DXcbWMSupport::windowManagerChanged,
                                 m_eventListener, &WindowEventListener::updateWindowBlurAreasForWM);
         }
 #endif
 
         updateWindowBlurAreasForWM();
+    } else {
+        qCDebug(dxcb) << "Enable blur window unchanged:" << enable;
     }
 }
 
 void DPlatformBackingStore::updateWindowBlurAreas()
 {
+    qCDebug(dxcb) << "Updating window blur areas";
     const QVariant &v = window()->property(windowBlurAreas);
     const QVector<quint32> &tmpV = qvariant_cast<QVector<quint32>>(v);
     const QVector<Utility::BlurArea> &a = *(reinterpret_cast<const QVector<Utility::BlurArea>*>(&tmpV));
 
-    if (a.isEmpty() && m_blurAreaList.isEmpty())
+    if (a.isEmpty() && m_blurAreaList.isEmpty()) {
+        qCDebug(dxcb) << "Blur areas are empty, skipping update";
         return;
+    }
 
+    qCDebug(dxcb) << "Blur areas count:" << a.size();
     m_blurAreaList = a;
 
     updateWindowBlurAreasForWM();

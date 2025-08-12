@@ -13,6 +13,7 @@
 #include <QPainter>
 #include <QCursor>
 #include <QDebug>
+#include <QLoggingCategory>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <private/qtx11extras_p.h>
 #else
@@ -33,6 +34,12 @@
 #include <X11/cursorfont.h>
 #include <X11/Xlib.h>
 
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
+
 #define _NET_WM_MOVERESIZE_MOVE              8   /* movement only */
 #define _NET_WM_MOVERESIZE_CANCEL           11   /* cancel operation */
 
@@ -50,8 +57,11 @@ DPP_BEGIN_NAMESPACE
 
 QImage Utility::dropShadow(const QPixmap &px, qreal radius, const QColor &color)
 {
-    if (px.isNull())
+    qCDebug(dxcb) << "dropShadow called, radius:" << radius << "color:" << color;
+    if (px.isNull()) {
+        qCDebug(dxcb) << "Pixmap is null, returning empty image";
         return QImage();
+    }
 
     QImage tmp(px.size() + QSize(radius * 2, radius * 2), QImage::Format_ARGB32_Premultiplied);
     tmp.fill(0);
@@ -67,8 +77,10 @@ QImage Utility::dropShadow(const QPixmap &px, qreal radius, const QColor &color)
     qt_blurImage(&blurPainter, tmp, radius, false, true);
     blurPainter.end();
 
-    if (color == QColor(Qt::black))
+    if (color == QColor(Qt::black)) {
+        qCDebug(dxcb) << "Color is black, returning blurred image";
         return blurred;
+    }
 
     tmp = blurred;
 
@@ -83,6 +95,7 @@ QImage Utility::dropShadow(const QPixmap &px, qreal radius, const QColor &color)
 
 QList<QRect> Utility::sudokuByRect(const QRect &rect, QMargins borders)
 {
+    qCDebug(dxcb) << "sudokuByRect called, rect:" << rect << "borders:" << borders;
     QList<QRect> list;
 
 //    qreal border_width = borders.left() + borders.right();
@@ -136,38 +149,48 @@ QImage Utility::borderImage(const QPixmap &px, const QMargins &borders,
 
 xcb_atom_t Utility::internAtom(xcb_connection_t *connection, const char *name, bool only_if_exists)
 {
-    if (!name || *name == 0)
+    qCDebug(dxcb) << "internAtom called, name:" << name << "only_if_exists:" << only_if_exists;
+    if (!name || *name == 0) {
+        qCDebug(dxcb) << "Empty atom name, returning XCB_NONE";
         return XCB_NONE;
+    }
 
     xcb_intern_atom_cookie_t cookie = xcb_intern_atom(connection, only_if_exists, strlen(name), name);
     xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(connection, cookie, 0);
 
-    if (!reply)
+    if (!reply) {
+        qCDebug(dxcb) << "No reply for atom:" << name;
         return XCB_NONE;
+    }
 
     xcb_atom_t atom = reply->atom;
     free(reply);
 
+    qCDebug(dxcb) << "Atom" << name << "=" << atom;
     return atom;
 }
 
 xcb_atom_t Utility::internAtom(const char *name, bool only_if_exists)
 {
+    qCDebug(dxcb) << "internAtom overload called, name:" << name;
     return internAtom(QX11Info::connection(), name, only_if_exists);
 }
 
 void Utility::startWindowSystemMove(quint32 WId)
 {
+    qCDebug(dxcb) << "startWindowSystemMove called, WId:" << WId;
     sendMoveResizeMessage(WId, _NET_WM_MOVERESIZE_MOVE);
 }
 
 void Utility::cancelWindowMoveResize(quint32 WId)
 {
+    qCDebug(dxcb) << "cancelWindowMoveResize called, WId:" << WId;
     sendMoveResizeMessage(WId, _NET_WM_MOVERESIZE_CANCEL);
 }
 
 void Utility::updateMousePointForWindowMove(quint32 WId, bool finished/* = false*/)
 {
+    qCDebug(dxcb) << "updateMousePointForWindowMove called, WId:" << WId << "finished:" << finished;
     // 获取主屏幕的光标位置并调用重载版本
     const QPoint &globalPos = qApp->primaryScreen()->handle()->cursor()->pos();
     updateMousePointForWindowMove(WId, globalPos, finished);
@@ -176,6 +199,7 @@ void Utility::updateMousePointForWindowMove(quint32 WId, bool finished/* = false
 // 新增：支持多屏幕的版本，接受自定义全局坐标
 void Utility::updateMousePointForWindowMove(quint32 WId, const QPoint &globalPos, bool finished/* = false*/)
 {
+    qCDebug(dxcb) << "updateMousePointForWindowMove overload called, WId:" << WId << "globalPos:" << globalPos << "finished:" << finished;
     xcb_client_message_event_t xev;
 
     xev.response_type = XCB_CLIENT_MESSAGE;
@@ -199,7 +223,9 @@ void Utility::updateMousePointForWindowMove(quint32 WId, const QPoint &globalPos
 
 void Utility::showWindowSystemMenu(quint32 WId, QPoint globalPos)
 {
+    qCDebug(dxcb) << "showWindowSystemMenu called, WId:" << WId << "globalPos:" << globalPos;
     if (globalPos.isNull()) {
+        qCDebug(dxcb) << "Global position is null, using cursor position";
         globalPos = qApp->primaryScreen()->handle()->cursor()->pos();
     }
 
@@ -223,10 +249,11 @@ void Utility::showWindowSystemMenu(quint32 WId, QPoint globalPos)
 
 void Utility::setFrameExtents(WId wid, const QMargins &margins)
 {
+    qCDebug(dxcb) << "setFrameExtents called, wid:" << wid << "margins:" << margins;
     xcb_atom_t frameExtents = internAtom("_GTK_FRAME_EXTENTS");
 
     if (frameExtents == XCB_NONE) {
-        qWarning() << "Failed to create atom with name _GTK_FRAME_EXTENTS";
+        qCWarning(dxcb) << "Failed to create atom with name _GTK_FRAME_EXTENTS";
         return;
     }
 
@@ -345,25 +372,35 @@ void Utility::sendMoveResizeMessage(quint32 WId, uint32_t action, QPoint globalP
 
 QWindow *Utility::getWindowById(quint32 WId)
 {
+    qCDebug(dxcb) << "getWindowById called, WId:" << WId;
     for (QWindow *w : qApp->allWindows()) {
         if (w->handle() && w->handle()->winId() == WId) {
+            qCDebug(dxcb) << "Found window for WId:" << WId;
             return w;
         }
     }
 
+    qCDebug(dxcb) << "No window found for WId:" << WId;
     return Q_NULLPTR;
 }
 
 qreal Utility::getWindowDevicePixelRatio(quint32 WId)
 {
-    if (const QWindow *w = getWindowById(WId))
-        return w->devicePixelRatio();
+    qCDebug(dxcb) << "getWindowDevicePixelRatio called, WId:" << WId;
+    if (const QWindow *w = getWindowById(WId)) {
+        const qreal ratio = w->devicePixelRatio();
+        qCDebug(dxcb) << "Window device pixel ratio:" << ratio;
+        return ratio;
+    }
 
-    return qApp->devicePixelRatio();
+    const qreal ratio = qApp->devicePixelRatio();
+    qCDebug(dxcb) << "Using app device pixel ratio:" << ratio;
+    return ratio;
 }
 
 void Utility::startWindowSystemResize(quint32 WId, CornerEdge cornerEdge, const QPoint &globalPos)
 {
+    qCDebug(dxcb) << "startWindowSystemResize called, WId:" << WId << "cornerEdge:" << cornerEdge << "globalPos:" << globalPos;
     sendMoveResizeMessage(WId, cornerEdge, globalPos);
 }
 
@@ -393,16 +430,18 @@ static xcb_cursor_t CornerEdge2Xcb_cursor_t(Utility::CornerEdge ce)
 
 bool Utility::setWindowCursor(quint32 WId, Utility::CornerEdge ce)
 {
+    qCDebug(dxcb) << "setWindowCursor called, WId:" << WId << "cornerEdge:" << ce;
     const auto display = QX11Info::display();
 
     Cursor cursor = XCreateFontCursor(display, CornerEdge2Xcb_cursor_t(ce));
 
     if (!cursor) {
-        qWarning() << "[ui]::setWindowCursor() call XCreateFontCursor() failed";
+        qCWarning(dxcb) << "XCreateFontCursor() failed for corner edge:" << ce;
         return false;
     }
 
     const int result = XDefineCursor(display, WId, cursor);
+    qCDebug(dxcb) << "XDefineCursor result:" << result;
 
     XFlush(display);
 
@@ -420,6 +459,7 @@ QRegion Utility::regionAddMargins(const QRegion &region, const QMargins &margins
 
 QByteArray Utility::windowProperty(quint32 WId, xcb_atom_t propAtom, xcb_atom_t typeAtom, quint32 len)
 {
+    qCDebug(dxcb) << "windowProperty called, WId:" << WId << "propAtom:" << propAtom << "typeAtom:" << typeAtom << "len:" << len;
     QByteArray data;
     xcb_connection_t* conn = QX11Info::connection();
     xcb_get_property_cookie_t cookie = xcb_get_property(conn, false, WId, propAtom, typeAtom, 0, len);
@@ -430,10 +470,14 @@ QByteArray Utility::windowProperty(quint32 WId, xcb_atom_t propAtom, xcb_atom_t 
         len = xcb_get_property_value_length(reply);
         const char* buf = static_cast<const char*>(xcb_get_property_value(reply));
         data.append(buf, len);
+        qCDebug(dxcb) << "Property data length:" << len;
         free(reply);
+    } else {
+        qCDebug(dxcb) << "No property reply received";
     }
 
     if (err != nullptr) {
+        qCWarning(dxcb) << "Property request error";
         free(err);
     }
 

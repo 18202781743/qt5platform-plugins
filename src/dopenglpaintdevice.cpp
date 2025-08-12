@@ -13,10 +13,13 @@
 #include <private/qopenglextensions_p.h>
 #include <private/qopenglcontext_p.h>
 #include <private/qopenglpaintdevice_p.h>
+#include <QLoggingCategory>
 
 QT_BEGIN_NAMESPACE
 extern Q_GUI_EXPORT QImage qt_gl_read_framebuffer(const QSize &size, bool alpha_format, bool include_alpha);
 QT_END_NAMESPACE
+
+Q_DECLARE_LOGGING_CATEGORY(dplatform)
 
 DPP_BEGIN_NAMESPACE
 
@@ -40,6 +43,7 @@ public:
         , shareContext(shareContext)
         , targetSurface(surface)
     {
+        qCDebug(dplatform) << "DOpenGLPaintDevicePrivate constructor called";
         if (!shareContext)
             this->shareContext = qt_gl_global_share_context();
     }
@@ -69,6 +73,7 @@ public:
 
 DOpenGLPaintDevicePrivate::~DOpenGLPaintDevicePrivate()
 {
+    qCDebug(dplatform) << "DOpenGLPaintDevicePrivate destructor called";
     Q_Q(DOpenGLPaintDevice);
     if (q->isValid()) {
         q->makeCurrent(); // this works even when the platformwindow is destroyed
@@ -84,15 +89,20 @@ DOpenGLPaintDevicePrivate::~DOpenGLPaintDevicePrivate()
 
 void DOpenGLPaintDevicePrivate::initialize()
 {
-    if (context)
+    qCDebug(dplatform) << "DOpenGLPaintDevicePrivate::initialize called";
+    if (context) {
+        qCDebug(dplatform) << "Context already exists, skipping initialization";
         return;
+    }
 
     if (builtinSurface) {
+        qCDebug(dplatform) << "Creating builtin surface";
         static_cast<QOffscreenSurface*>(targetSurface)->create();
     }
 
-    if (!targetSurface->surfaceHandle())
-        qWarning("Attempted to initialize DOpenGLPaintDevice without a platform surface");
+    if (!targetSurface->surfaceHandle()) {
+        qCWarning(dplatform) << "Attempted to initialize DOpenGLPaintDevice without a platform surface";
+    }
 
     context.reset(new QOpenGLContext);
     context->setShareContext(shareContext);
@@ -118,6 +128,7 @@ static int defaultSamples(int fallback)
 
 void DOpenGLPaintDevicePrivate::beginPaint()
 {
+    qCDebug(dplatform) << "beginPaint called";
     Q_Q(DOpenGLPaintDevice);
 
     initialize();
@@ -126,8 +137,11 @@ void DOpenGLPaintDevicePrivate::beginPaint()
     const int deviceWidth = q->width() * q->devicePixelRatio();
     const int deviceHeight = q->height() * q->devicePixelRatio();
     const QSize deviceSize(deviceWidth, deviceHeight);
+    qCDebug(dplatform) << "Device size:" << deviceSize << "updateBehavior:" << updateBehavior;
+    
     if (updateBehavior > DOpenGLPaintDevice::NoPartialUpdate) {
         if (!fbo || fbo->size() != deviceSize) {
+            qCDebug(dplatform) << "Creating new FBO for device size:" << deviceSize;
             QOpenGLFramebufferObjectFormat fboFormat;
             fboFormat.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
             int samples = targetSurface->format().samples();
@@ -143,26 +157,34 @@ void DOpenGLPaintDevicePrivate::beginPaint()
             else
                 qWarning("DOpenGLPaintDevice: PartialUpdateBlend does not support multisampling");
             fbo.reset(new QOpenGLFramebufferObject(deviceSize, fboFormat));
+        } else {
+            qCDebug(dplatform) << "Using existing FBO";
         }
     }
 
     context->functions()->glViewport(0, 0, deviceWidth, deviceHeight);
     context->functions()->glBindFramebuffer(GL_FRAMEBUFFER, context->defaultFramebufferObject());
 
-    if (updateBehavior > DOpenGLPaintDevice::NoPartialUpdate)
+    if (updateBehavior > DOpenGLPaintDevice::NoPartialUpdate) {
+        qCDebug(dplatform) << "Binding FBO";
         fbo->bind();
+    }
 }
 
 void DOpenGLPaintDevicePrivate::endPaint()
 {
+    qCDebug(dplatform) << "endPaint called";
     Q_Q(DOpenGLPaintDevice);
 
-    if (updateBehavior > DOpenGLPaintDevice::NoPartialUpdate)
+    if (updateBehavior > DOpenGLPaintDevice::NoPartialUpdate) {
+        qCDebug(dplatform) << "Releasing FBO";
         fbo->release();
+    }
 
     context->functions()->glBindFramebuffer(GL_FRAMEBUFFER, context->defaultFramebufferObject());
 
     if (updateBehavior == DOpenGLPaintDevice::PartialUpdateBlit && hasFboBlit) {
+        qCDebug(dplatform) << "Using FBO blit";
         const int deviceWidth = q->width() * q->devicePixelRatio();
         const int deviceHeight = q->height() * q->devicePixelRatio();
         QOpenGLExtensions extensions(context.data());
@@ -172,12 +194,16 @@ void DOpenGLPaintDevicePrivate::endPaint()
                                      0, 0, deviceWidth, deviceHeight,
                                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
     } else if (updateBehavior > DOpenGLPaintDevice::NoPartialUpdate) {
+        qCDebug(dplatform) << "Using texture blitter";
         if (updateBehavior == DOpenGLPaintDevice::PartialUpdateBlend) {
+            qCDebug(dplatform) << "Enabling blend mode";
             context->functions()->glEnable(GL_BLEND);
             context->functions()->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         }
-        if (!blitter.isCreated())
+        if (!blitter.isCreated()) {
+            qCDebug(dplatform) << "Creating texture blitter";
             blitter.create();
+        }
 
         QRect windowRect(QPoint(0, 0), fbo->size());
         QMatrix4x4 target = QOpenGLTextureBlitter::targetTransform(windowRect, windowRect);
@@ -185,17 +211,23 @@ void DOpenGLPaintDevicePrivate::endPaint()
         blitter.blit(fbo->texture(), target, QOpenGLTextureBlitter::OriginBottomLeft);
         blitter.release();
 
-        if (updateBehavior == DOpenGLPaintDevice::PartialUpdateBlend)
+        if (updateBehavior == DOpenGLPaintDevice::PartialUpdateBlend) {
+            qCDebug(dplatform) << "Disabling blend mode";
             context->functions()->glDisable(GL_BLEND);
+        }
     }
 }
 
 void DOpenGLPaintDevicePrivate::bindFBO()
 {
-    if (updateBehavior > DOpenGLPaintDevice::NoPartialUpdate)
+    qCDebug(dplatform) << "bindFBO called, updateBehavior:" << updateBehavior;
+    if (updateBehavior > DOpenGLPaintDevice::NoPartialUpdate) {
+        qCDebug(dplatform) << "Binding FBO";
         fbo->bind();
-    else
+    } else {
+        qCDebug(dplatform) << "Binding default FBO";
         QOpenGLFramebufferObject::bindDefault();
+    }
 }
 
 /*!
@@ -206,6 +238,7 @@ void DOpenGLPaintDevicePrivate::bindFBO()
 DOpenGLPaintDevice::DOpenGLPaintDevice(QSurface *surface, DOpenGLPaintDevice::UpdateBehavior updateBehavior)
     : QOpenGLPaintDevice(*new DOpenGLPaintDevicePrivate(this, surface, nullptr, updateBehavior))
 {
+    qCDebug(dplatform) << "DOpenGLPaintDevice constructor called with surface, updateBehavior:" << updateBehavior;
     setSize(surface->size());
     d_func()->builtinSurface = false;
 }
@@ -213,6 +246,7 @@ DOpenGLPaintDevice::DOpenGLPaintDevice(QSurface *surface, DOpenGLPaintDevice::Up
 DOpenGLPaintDevice::DOpenGLPaintDevice(const QSize &size, DOpenGLPaintDevice::UpdateBehavior updateBehavior)
     : QOpenGLPaintDevice(*new DOpenGLPaintDevicePrivate(this, new QOffscreenSurface(), nullptr, updateBehavior))
 {
+    qCDebug(dplatform) << "DOpenGLPaintDevice constructor called with size:" << size << "updateBehavior:" << updateBehavior;
     setSize(size);
     d_func()->builtinSurface = true;
 }
@@ -257,18 +291,22 @@ DOpenGLPaintDevice::DOpenGLPaintDevice(QOpenGLContext *shareContext, const QSize
 */
 DOpenGLPaintDevice::~DOpenGLPaintDevice()
 {
+    qCDebug(dplatform) << "DOpenGLPaintDevice destructor called";
     makeCurrent();
 }
 
 void DOpenGLPaintDevice::resize(const QSize &size)
 {
+    qCDebug(dplatform) << "resize called, size:" << size;
     Q_ASSERT(!paintingActive());
     setSize(size);
 
     Q_D(DOpenGLPaintDevice);
 
-    if (d->fbo)
+    if (d->fbo) {
+        qCDebug(dplatform) << "Resetting FBO";
         d->fbo.reset(nullptr);
+    }
 }
 
 /*!
@@ -276,6 +314,7 @@ void DOpenGLPaintDevice::resize(const QSize &size)
 */
 DOpenGLPaintDevice::UpdateBehavior DOpenGLPaintDevice::updateBehavior() const
 {
+    qCDebug(dplatform) << "updateBehavior called";
     Q_D(const DOpenGLPaintDevice);
     return d->updateBehavior;
 }
@@ -313,10 +352,13 @@ bool DOpenGLPaintDevice::isValid() const
  */
 void DOpenGLPaintDevice::makeCurrent()
 {
+    qCDebug(dplatform) << "makeCurrent called";
     Q_D(DOpenGLPaintDevice);
 
-    if (!isValid())
+    if (!isValid()) {
+        qCDebug(dplatform) << "Device is not valid, skipping makeCurrent";
         return;
+    }
 
     // The platform window may be destroyed at this stage and therefore
     // makeCurrent() may not safely be called with 'this'.
@@ -335,16 +377,20 @@ void DOpenGLPaintDevice::makeCurrent()
  */
 void DOpenGLPaintDevice::doneCurrent()
 {
+    qCDebug(dplatform) << "doneCurrent called";
     Q_D(DOpenGLPaintDevice);
 
-    if (!isValid())
+    if (!isValid()) {
+        qCDebug(dplatform) << "Device is not valid, skipping doneCurrent";
         return;
+    }
 
     d->context->doneCurrent();
 }
 
 void DOpenGLPaintDevice::flush()
 {
+    qCDebug(dplatform) << "flush called";
     Q_D(DOpenGLPaintDevice);
     d->context->makeCurrent(d->targetSurface);
     d->context->swapBuffers(d->targetSurface);
@@ -355,6 +401,7 @@ void DOpenGLPaintDevice::flush()
  */
 QOpenGLContext *DOpenGLPaintDevice::context() const
 {
+    qCDebug(dplatform) << "context called";
     Q_D(const DOpenGLPaintDevice);
     return d->context.data();
 }
@@ -364,6 +411,7 @@ QOpenGLContext *DOpenGLPaintDevice::context() const
 */
 QOpenGLContext *DOpenGLPaintDevice::shareContext() const
 {
+    qCDebug(dplatform) << "shareContext called";
     Q_D(const DOpenGLPaintDevice);
     return d->shareContext;
 }
@@ -380,13 +428,19 @@ QOpenGLContext *DOpenGLPaintDevice::shareContext() const
  */
 GLuint DOpenGLPaintDevice::defaultFramebufferObject() const
 {
+    qCDebug(dplatform) << "defaultFramebufferObject called";
     Q_D(const DOpenGLPaintDevice);
-    if (d->updateBehavior > NoPartialUpdate && d->fbo)
+    if (d->updateBehavior > NoPartialUpdate && d->fbo) {
+        qCDebug(dplatform) << "Using FBO handle:" << d->fbo->handle();
         return d->fbo->handle();
-    else if (QOpenGLContext *ctx = QOpenGLContext::currentContext())
-        return ctx->defaultFramebufferObject();
-    else
+    } else if (QOpenGLContext *ctx = QOpenGLContext::currentContext()) {
+        const GLuint fbo = ctx->defaultFramebufferObject();
+        qCDebug(dplatform) << "Using current context FBO:" << fbo;
+        return fbo;
+    } else {
+        qCDebug(dplatform) << "No FBO available, returning 0";
         return 0;
+    }
 }
 
 /*!

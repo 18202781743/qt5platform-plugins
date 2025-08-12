@@ -12,10 +12,13 @@
 
 #include <QPalette>
 #include <QDebug>
+#include <QLoggingCategory>
 
 #define TEXT_SPACINGWIDGET 20
 #define TEXT_SPACINGHEIGHT 10
 #define WINDOWBOARD 1
+
+Q_DECLARE_LOGGING_CATEGORY(dplatform)
 
 DPP_BEGIN_NAMESPACE
 
@@ -23,6 +26,7 @@ DSelectedTextTooltip::DSelectedTextTooltip()
     : QRasterWindow()
     , m_borderColor(0, 0, 0, 0.05 *255)
 {
+    qCDebug(dplatform) << "DSelectedTextTooltip constructor called";
     setFlags(Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::WindowDoesNotAcceptFocus);
 
     QSurfaceFormat format;
@@ -49,12 +53,14 @@ DSelectedTextTooltip::DSelectedTextTooltip()
 
 DSelectedTextTooltip::~DSelectedTextTooltip()
 {
+    qCDebug(dplatform) << "DSelectedTextTooltip destructor called";
 }
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 bool DSelectedTextTooltip::eventFilter(QObject *obj, QEvent *event)
 {
     if (event->type() == QEvent::ApplicationFontChange) {
+        qCDebug(dplatform) << "Application font changed";
         onFontChanged();
     }
     return QRasterWindow::eventFilter(obj, event);
@@ -63,6 +69,7 @@ bool DSelectedTextTooltip::eventFilter(QObject *obj, QEvent *event)
 
 void DSelectedTextTooltip::onFontChanged()
 {
+    qCDebug(dplatform) << "onFontChanged called";
     QFontMetrics font_metrics(qApp->font());
     int tooltip_width = 0;
     for (auto &font_info : m_textInfoVec) {
@@ -78,17 +85,20 @@ void DSelectedTextTooltip::onFontChanged()
 
 void DSelectedTextTooltip::updateColor()
 {
+    qCDebug(dplatform) << "updateColor called";
     // 参考DtkGui
     QColor rgb_color = qApp->palette().window().color().toRgb();
 
     float luminance = 0.299 * rgb_color.redF() + 0.587 * rgb_color.greenF() + 0.114 * rgb_color.blueF();
 
     if (qRound(luminance * 255) > 191) {
+        qCDebug(dplatform) << "Using light theme colors";
         m_backgroundColor = QColor("#fafafa");
         m_dividerColor = QColor("#d6d6d6");
         return;
     }
 
+    qCDebug(dplatform) << "Using dark theme colors";
     m_backgroundColor = QColor("#434343");
     m_dividerColor = QColor("#4f4f4f");
     return;
@@ -96,24 +106,29 @@ void DSelectedTextTooltip::updateColor()
 
 DSelectedTextTooltip::OptionType DSelectedTextTooltip::getOptionType(const QPoint &pos) const
 {
+    qCDebug(dplatform) << "getOptionType called, pos:" << pos;
     int tmp_width = 0;
     for (const auto &info : m_textInfoVec) {
         tmp_width += info.textWidth;
         if (pos.x() < tmp_width) {
+            qCDebug(dplatform) << "Option type found:" << info.optType;
             return info.optType;
         }
     }
 
+    qCDebug(dplatform) << "No option type found, returning None";
     return None;
 }
 
 void DSelectedTextTooltip::mousePressEvent(QMouseEvent *event)
 {
+    qCDebug(dplatform) << "mousePressEvent called, pos:" << event->pos();
     Q_EMIT optAction(getOptionType(event->pos()));
 }
 
 void DSelectedTextTooltip::paintEvent(QPaintEvent *pe)
 {
+    qCDebug(dplatform) << "paintEvent called";
     updateColor();
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);

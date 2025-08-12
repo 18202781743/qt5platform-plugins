@@ -17,9 +17,12 @@
 #include <QKeyEvent>
 #include <QDebug>
 #include <QScreen>
+#include <QLoggingCategory>
 
 #define EFFECTIVEWIDTH 10
 #define STATUSBARHEIGHT 40
+
+Q_DECLARE_LOGGING_CATEGORY(dplatform)
 
 DPP_BEGIN_NAMESPACE
 
@@ -35,16 +38,20 @@ DDesktopInputSelectionControl::DDesktopInputSelectionControl(QObject *parent, QI
     , m_handleVisible(false)
     , m_fingerOptSize(40, static_cast<int>(40 * 1.12)) // because a finger patch is slightly taller than its width
 {
+    qCDebug(dplatform) << "DDesktopInputSelectionControl constructor called";
     if (auto window = QGuiApplication::focusWindow()) {
+        qCDebug(dplatform) << "Installing event filter on focus window";
         window->installEventFilter(this);
     }
 
     connect(m_pInputMethod, &QInputMethod::anchorRectangleChanged, this, [ = ]{
+        qCDebug(dplatform) << "Anchor rectangle changed";
         QPointF point = anchorRectangle().topLeft();
         QObject *widget = QGuiApplication::focusObject();
         updateSelectionControlVisible();
 
         if (point.isNull() || (m_focusWindow.value(widget) == point)) {
+            qCDebug(dplatform) << "Point is null or unchanged";
             return;
         }
 
@@ -58,6 +65,7 @@ DDesktopInputSelectionControl::DDesktopInputSelectionControl(QObject *parent, QI
 
 DDesktopInputSelectionControl::~DDesktopInputSelectionControl()
 {
+    qCDebug(dplatform) << "DDesktopInputSelectionControl destructor called";
     qDeleteAll(m_eventQueue);
     m_eventQueue.clear();
 }
@@ -67,6 +75,7 @@ DDesktopInputSelectionControl::~DDesktopInputSelectionControl()
  */
 QRect DDesktopInputSelectionControl::handleRectForCursorRect(const QRectF &cursorRect) const
 {
+    qCDebug(dplatform) << "handleRectForCursorRect called, cursorRect:" << cursorRect;
     // TODO 平板下默认1.5倍缩放，缩放再度调整时(2 3期)细节可能有问题故使用此临时方案。
     const int margin = static_cast<int>(m_cursorSelectionHandle->devicePixelRatio()*2);
     const int topMargin = (m_fingerOptSize.height() - m_handleImageSize.height()) / 2;
@@ -76,10 +85,12 @@ QRect DDesktopInputSelectionControl::handleRectForCursorRect(const QRectF &curso
 
     // 当从后往前选中时，为了防止光标被文字覆盖，这里把光标绘制在顶部
     if (cursorRectangle().y() < anchorRectangle().y()) {
+        qCDebug(dplatform) << "Cursor above anchor, positioning handle at top";
         pos.setY(int(cursorRect.top()) - topMargin - m_handleImageSize.height());
         //由于顶部光标和底部的光标不同，这里更新一下handle类型
         m_cursorSelectionHandle->setHandlePosition(DInputSelectionHandle::Up);
     } else {
+        qCDebug(dplatform) << "Cursor below anchor, positioning handle at bottom";
         m_cursorSelectionHandle->setHandlePosition(DInputSelectionHandle::Down);
     }
 
@@ -88,6 +99,7 @@ QRect DDesktopInputSelectionControl::handleRectForCursorRect(const QRectF &curso
 
 QRect DDesktopInputSelectionControl::handleRectForAnchorRect(const QRectF &anchorRect) const
 {
+    qCDebug(dplatform) << "handleRectForAnchorRect called, anchorRect:" << anchorRect;
     // TODO 平板下默认1.5倍缩放，缩放再度调整时(2 3期)细节可能有问题故使用此临时方案。
     const int margin = static_cast<int>(m_anchorSelectionHandle->devicePixelRatio()*2);
     const int topMargin = (m_fingerOptSize.height() - m_handleImageSize.height()) / 2;
@@ -97,9 +109,11 @@ QRect DDesktopInputSelectionControl::handleRectForAnchorRect(const QRectF &ancho
 
     // 当从后往前选中时，把anchor光标绘制底部，和cursor的处理保持一致
     if (cursorRectangle().y() < anchorRectangle().y()) {
+        qCDebug(dplatform) << "Cursor above anchor, positioning anchor handle at bottom";
         pos.setY(int(anchorRect.bottom()) - topMargin);
         m_anchorSelectionHandle->setHandlePosition(DInputSelectionHandle::Down);
     } else {
+        qCDebug(dplatform) << "Cursor below anchor, positioning anchor handle at top";
         m_anchorSelectionHandle->setHandlePosition(DInputSelectionHandle::Up);
     }
 
@@ -108,7 +122,9 @@ QRect DDesktopInputSelectionControl::handleRectForAnchorRect(const QRectF &ancho
 
 bool DDesktopInputSelectionControl::testHandleVisible() const
 {
-    return m_pApplicationEventMonitor->lastInputDeviceType() == DApplicationEventMonitor::TouchScreen;
+    bool result = m_pApplicationEventMonitor->lastInputDeviceType() == DApplicationEventMonitor::TouchScreen;
+    qCDebug(dplatform) << "testHandleVisible called, result:" << result;
+    return result;
 }
 
 /*
@@ -116,6 +132,7 @@ bool DDesktopInputSelectionControl::testHandleVisible() const
  */
 QRect DDesktopInputSelectionControl::anchorHandleRect() const
 {
+    qCDebug(dplatform) << "anchorHandleRect called";
     return handleRectForAnchorRect(anchorRectangle());
 }
 
@@ -124,11 +141,13 @@ QRect DDesktopInputSelectionControl::anchorHandleRect() const
  */
 QRect DDesktopInputSelectionControl::cursorHandleRect() const
 {
+    qCDebug(dplatform) << "cursorHandleRect called";
     return handleRectForCursorRect(cursorRectangle());
 }
 
 static int getInputRectangleY(const QPoint &pos)
 {
+    qCDebug(dplatform) << "getInputRectangleY called, pos:" << pos;
     // 保证handle不会超出TextEdit类输入框
     int posY = pos.y();
     QRect rect = QGuiApplication::inputMethod()->queryFocusObject(Qt::ImInputItemClipRectangle, true).toRect();
@@ -138,8 +157,10 @@ static int getInputRectangleY(const QPoint &pos)
         rect.moveTo(point);
 
         if (pos.y() < rect.y()) {
+            qCDebug(dplatform) << "Position above input rectangle, adjusting Y";
             posY = rect.y();
         } else if (pos.y() > rect.y() + rect.height()) {
+            qCDebug(dplatform) << "Position below input rectangle, adjusting Y";
             posY = rect.y() + rect.height();
         }
     }
@@ -149,7 +170,9 @@ static int getInputRectangleY(const QPoint &pos)
 
 void DDesktopInputSelectionControl::updateAnchorHandlePosition()
 {
+    qCDebug(dplatform) << "updateAnchorHandlePosition called";
     if (anchorRectangle().topLeft().isNull()) {
+        qCDebug(dplatform) << "Anchor rectangle is null, hiding handle";
         m_anchorSelectionHandle->hide();
         return;
     }
@@ -173,7 +196,9 @@ void DDesktopInputSelectionControl::updateAnchorHandlePosition()
 
 void DDesktopInputSelectionControl::updateCursorHandlePosition()
 {
+    qCDebug(dplatform) << "updateCursorHandlePosition called";
     if (anchorRectangle().topLeft().isNull()) {
+        qCDebug(dplatform) << "Anchor rectangle is null, hiding cursor handle";
         m_cursorSelectionHandle->hide();
         return;
     }
@@ -195,7 +220,9 @@ void DDesktopInputSelectionControl::updateCursorHandlePosition()
 
 void DDesktopInputSelectionControl::updateTooltipPosition()
 {
+    qCDebug(dplatform) << "updateTooltipPosition called";
     if (anchorRectangle().topLeft().isNull()) {
+        qCDebug(dplatform) << "Anchor rectangle is null, hiding tooltip";
         m_selectedTextTooltip->hide();
         return;
     }
@@ -250,6 +277,7 @@ void DDesktopInputSelectionControl::updateTooltipPosition()
 
 void DDesktopInputSelectionControl::createHandles()
 {
+    qCDebug(dplatform) << "createHandles called";
     m_selectedTextTooltip.reset(new DSelectedTextTooltip);
     m_anchorSelectionHandle.reset(new DInputSelectionHandle(DInputSelectionHandle::Up, this));
     m_cursorSelectionHandle.reset(new DInputSelectionHandle(DInputSelectionHandle::Down, this));
@@ -263,14 +291,18 @@ void DDesktopInputSelectionControl::createHandles()
 
 void DDesktopInputSelectionControl::onWindowStateChanged(Qt::WindowState state)
 {
+    qCDebug(dplatform) << "onWindowStateChanged called, state:" << state;
     m_focusWindow.clear();
-    m_anchorSelectionHandle->setVisible(state != Qt::WindowState::WindowMinimized);
-    m_cursorSelectionHandle->setVisible(state != Qt::WindowState::WindowMinimized);
-    m_selectedTextTooltip->setVisible(state != Qt::WindowState::WindowMinimized);
+    const bool visible = state != Qt::WindowState::WindowMinimized;
+    qCDebug(dplatform) << "Setting handles visibility:" << visible;
+    m_anchorSelectionHandle->setVisible(visible);
+    m_cursorSelectionHandle->setVisible(visible);
+    m_selectedTextTooltip->setVisible(visible);
 }
 
 void DDesktopInputSelectionControl::updateSelectionControlVisible()
 {
+    qCDebug(dplatform) << "updateSelectionControlVisible called";
     Q_ASSERT(m_pApplicationEventMonitor);
 
     bool selectText = m_pInputMethod->queryFocusObject(Qt::ImCurrentSelection,true).toString().isNull();
@@ -291,14 +323,17 @@ void DDesktopInputSelectionControl::updateSelectionControlVisible()
 
 void DDesktopInputSelectionControl::onOptAction(int type)
 {
+    qCDebug(dplatform) << "onOptAction called, type:" << type;
     switch (type) {
     case DSelectedTextTooltip::Cut: {
+        qCDebug(dplatform) << "Sending cut event";
         QKeyEvent key_event(QEvent::KeyPress, Qt::Key_X, Qt::ControlModifier);
         QCoreApplication::sendEvent(QGuiApplication::focusObject(), &key_event);
         break;
     }
 
     case DSelectedTextTooltip::Copy: {
+        qCDebug(dplatform) << "Sending copy event";
         QKeyEvent key_event(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
         QCoreApplication::sendEvent(QGuiApplication::focusObject(), &key_event);
         Q_EMIT selectionControlVisibleChanged();
@@ -306,12 +341,14 @@ void DDesktopInputSelectionControl::onOptAction(int type)
     }
 
     case DSelectedTextTooltip::Paste: {
+        qCDebug(dplatform) << "Sending paste event";
         QKeyEvent key_event(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QCoreApplication::sendEvent(QGuiApplication::focusObject(), &key_event);
         break;
     }
 
     case DSelectedTextTooltip::SelectAll: {
+        qCDebug(dplatform) << "Sending select all event";
         QKeyEvent key_event(QEvent::KeyPress, Qt::Key_A, Qt::ControlModifier);
         QCoreApplication::sendEvent(QGuiApplication::focusObject(), &key_event);
         // 更新handle的位置
@@ -321,13 +358,16 @@ void DDesktopInputSelectionControl::onOptAction(int type)
         break;
     }
     default:
+        qCDebug(dplatform) << "Unknown action type:" << type;
         break;
     }
 }
 
 void DDesktopInputSelectionControl::onFocusWindowChanged()
 {
+    qCDebug(dplatform) << "onFocusWindowChanged called";
     if (!qApp->focusWindow()) {
+        qCDebug(dplatform) << "No focus window, hiding all handles";
         m_anchorSelectionHandle->hide();
         m_cursorSelectionHandle->hide();
         m_selectedTextTooltip->hide();
@@ -337,32 +377,40 @@ void DDesktopInputSelectionControl::onFocusWindowChanged()
 
 void DDesktopInputSelectionControl::setHandleState(HandleState state)
 {
+    qCDebug(dplatform) << "setHandleState called, state:" << state;
     m_handleState = state;
 }
 
 int DDesktopInputSelectionControl::anchorPosition() const
 {
+    qCDebug(dplatform) << "anchorPosition called";
     QInputMethodQueryEvent imQueryEvent(Qt::InputMethodQueries(Qt::ImHints | Qt::ImQueryInput | Qt::ImInputItemClipRectangle));
     const int anchorPosition = imQueryEvent.value(Qt::ImAnchorPosition).toInt();
+    qCDebug(dplatform) << "Anchor position:" << anchorPosition;
     return anchorPosition;
 }
 
 int DDesktopInputSelectionControl::cursorPosition() const
 {
+    qCDebug(dplatform) << "cursorPosition called";
     QInputMethodQueryEvent imQueryEvent(Qt::InputMethodQueries(Qt::ImHints | Qt::ImQueryInput | Qt::ImInputItemClipRectangle));
     const int cursorPosition = imQueryEvent.value(Qt::ImCursorPosition).toInt();
+    qCDebug(dplatform) << "Cursor position:" << cursorPosition;
     return cursorPosition;
 }
 
 Qt::InputMethodHints DDesktopInputSelectionControl::inputMethodHints() const
 {
+    qCDebug(dplatform) << "inputMethodHints called";
     QInputMethodQueryEvent imQueryEvent(Qt::InputMethodQueries(Qt::ImHints | Qt::ImQueryInput | Qt::ImInputItemClipRectangle));
     Qt::InputMethodHints inputMethodHints = Qt::InputMethodHints(imQueryEvent.value(Qt::ImHints).toInt());
+    qCDebug(dplatform) << "Input method hints:" << inputMethodHints;
     return inputMethodHints;
 }
 
 QRectF DDesktopInputSelectionControl::anchorRectangle() const
 {
+    qCDebug(dplatform) << "anchorRectangle called";
     return m_pInputMethod->anchorRectangle();
 }
 

@@ -13,11 +13,18 @@
 
 #include <QDebug>
 #include <QGuiApplication>
+#include <QLoggingCategory>
 
 #include <private/qwindow_p.h>
 #include <private/qguiapplication_p.h>
 
 #include <xcb/xcb_icccm.h>
+
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
 
 DPP_BEGIN_NAMESPACE
 #define xcbReplyHolder(xcb_reply_type, var) QScopedPointer<xcb_reply_type, QScopedPointerPodDeleter> var
@@ -42,6 +49,7 @@ enum {
 DForeignPlatformWindow::DForeignPlatformWindow(QWindow *window, WId winId)
     : QXcbWindow(window)
 {
+    qCDebug(dxcb) << "DForeignPlatformWindow constructor called, winId:" << winId;
     QGuiApplicationPrivate::window_list.removeOne(window);
     m_window = winId;
 
@@ -58,6 +66,7 @@ DForeignPlatformWindow::DForeignPlatformWindow(QWindow *window, WId winId)
     // 因为此窗口不包含在 QGuiApplication::allWindows() 中，屏幕对象销毁时不会重置它的屏幕为主屏
     QObject::connect(qApp, &QGuiApplication::screenRemoved, window, [window] (QScreen *screen) {
         if (screen == window->screen()) {
+            qCDebug(dxcb) << "Screen removed, setting window to primary screen";
             window->setScreen(qApp->primaryScreen());
         }
     });
@@ -65,6 +74,7 @@ DForeignPlatformWindow::DForeignPlatformWindow(QWindow *window, WId winId)
 
 DForeignPlatformWindow::~DForeignPlatformWindow()
 {
+    qCDebug(dxcb) << "DForeignPlatformWindow destructor called";
     qt_window_private(window())->windowFlags = Qt::ForeignWindow;
     // removeWindowEventListener
     destroy();
@@ -74,15 +84,19 @@ DForeignPlatformWindow::~DForeignPlatformWindow()
 
 QRect DForeignPlatformWindow::geometry() const
 {
+    qCDebug(dxcb) << "geometry called, m_window:" << m_window;
     xcb_connection_t *conn = DPlatformIntegration::xcbConnection()->xcb_connection();
 
     xcbReplyHolder(xcb_get_geometry_reply_t, geomReply)(xcb_get_geometry_reply(conn, xcb_get_geometry(conn, m_window), nullptr));
-    if (!geomReply)
+    if (!geomReply) {
+        qCDebug(dxcb) << "Failed to get geometry reply";
         return QRect();
+    }
 
     auto xtc_cookie = xcb_translate_coordinates(conn, m_window, DPlatformIntegration::xcbConnection()->rootWindow(), 0, 0);
     xcbReplyHolder(xcb_translate_coordinates_reply_t, translateReply)(xcb_translate_coordinates_reply(conn, xtc_cookie, nullptr));
     if (!translateReply) {
+        qCDebug(dxcb) << "Failed to translate coordinates";
         return QRect();
     }
 
@@ -93,6 +107,7 @@ QRect DForeignPlatformWindow::geometry() const
                                                         Utility::internAtom("_GTK_FRAME_EXTENTS"), XCB_ATOM_CARDINAL, 0, 4);
     xcbReplyHolder(xcb_get_property_reply_t, reply)(xcb_get_property_reply(xcb_connection(), cookie, nullptr));
     if (reply && reply->type == XCB_ATOM_CARDINAL && reply->format == 32 && reply->value_len == 4) {
+        qCDebug(dxcb) << "Found GTK frame extents, adjusting geometry";
         quint32 *data = (quint32 *)xcb_get_property_value(reply.data());
         // _NET_FRAME_EXTENTS format is left, right, top, bottom
         return result.marginsRemoved(QMargins(data[0], data[2], data[1], data[3]));
@@ -104,8 +119,10 @@ QRect DForeignPlatformWindow::geometry() const
 // QXcbWindow::frameMargins会额外根据窗口的geometry来计算frame margins，在这里我们不希望使用这个fallback的逻辑
 QMargins DForeignPlatformWindow::frameMargins() const
 {
+    qCDebug(dxcb) << "frameMargins called, m_dirtyFrameMargins:" << m_dirtyFrameMargins;
     if (m_dirtyFrameMargins) {
         if (DXcbWMSupport::instance()->isSupportedByWM(atom(QXcbAtom::D_QXCBATOM_WRAPPER(_NET_FRAME_EXTENTS)))) {
+            qCDebug(dxcb) << "Getting frame extents from window manager";
             xcb_get_property_cookie_t cookie = xcb_get_property(xcb_connection(), false, m_window, atom(QXcbAtom::D_QXCBATOM_WRAPPER(_NET_FRAME_EXTENTS)), XCB_ATOM_CARDINAL, 0, 4);
             xcb_get_property_reply_t *reply = xcb_get_property_reply(xcb_connection(), cookie, nullptr);
 
@@ -114,10 +131,17 @@ QMargins DForeignPlatformWindow::frameMargins() const
                     quint32 *data = (quint32 *)xcb_get_property_value(reply);
                     // _NET_FRAME_EXTENTS format is left, right, top, bottom
                     m_frameMargins = QMargins(data[0], data[2], data[1], data[3]);
+                    qCDebug(dxcb) << "Frame margins:" << m_frameMargins;
+                } else {
+                    qCDebug(dxcb) << "Invalid frame extents property format";
                 }
 
                 free(reply);
+            } else {
+                qCDebug(dxcb) << "Failed to get frame extents property";
             }
+        } else {
+            qCDebug(dxcb) << "Window manager does not support _NET_FRAME_EXTENTS";
         }
 
         m_dirtyFrameMargins = false;
@@ -129,9 +153,11 @@ QMargins DForeignPlatformWindow::frameMargins() const
 #ifdef Q_OS_LINUX
 void DForeignPlatformWindow::handleConfigureNotifyEvent(const xcb_configure_notify_event_t *event)
 {
+    qCDebug(dxcb) << "handleConfigureNotifyEvent called";
     bool fromSendEvent = (event->response_type & 0x80);
     QPoint pos(event->x, event->y);
     if (!QPlatformWindow::parent() && !fromSendEvent) {
+        qCDebug(dxcb) << "Querying position from X server";
         // Do not trust the position, query it instead.
         xcb_translate_coordinates_cookie_t cookie = xcb_translate_coordinates(xcb_connection(), xcb_window(),
                                                                               xcbScreen()->root(), 0, 0);
@@ -144,9 +170,12 @@ void DForeignPlatformWindow::handleConfigureNotifyEvent(const xcb_configure_noti
     }
 
     QRect actualGeometry = QRect(pos, QSize(event->width, event->height));
+    qCDebug(dxcb) << "Actual geometry:" << actualGeometry;
     QPlatformScreen *newScreen = QPlatformWindow::parent() ? QPlatformWindow::parent()->screen() : screenForGeometry(actualGeometry);
-    if (!newScreen)
+    if (!newScreen) {
+        qCDebug(dxcb) << "No screen found for geometry";
         return;
+    }
 
     // auto remove _GTK_FRAME_EXTENTS
     xcb_get_property_cookie_t cookie = xcb_get_property(xcb_connection(), false, m_window,
@@ -154,6 +183,7 @@ void DForeignPlatformWindow::handleConfigureNotifyEvent(const xcb_configure_noti
     QScopedPointer<xcb_get_property_reply_t, QScopedPointerPodDeleter> reply(
         xcb_get_property_reply(xcb_connection(), cookie, NULL));
     if (reply && reply->type == XCB_ATOM_CARDINAL && reply->format == 32 && reply->value_len == 4) {
+        qCDebug(dxcb) << "Removing GTK frame extents from geometry";
         quint32 *data = (quint32 *)xcb_get_property_value(reply.data());
         // _NET_FRAME_EXTENTS format is left, right, top, bottom
         actualGeometry = actualGeometry.marginsRemoved(QMargins(data[0], data[2], data[1], data[3]));
@@ -181,35 +211,46 @@ void DForeignPlatformWindow::handleConfigureNotifyEvent(const xcb_configure_noti
 #endif
         m_syncState = SyncAndConfigureReceived;
 
+    qCDebug(dxcb) << "Setting dirty frame margins";
     m_dirtyFrameMargins = true;
 }
 
 void DForeignPlatformWindow::handlePropertyNotifyEvent(const xcb_property_notify_event_t *event)
 {
+    qCDebug(dxcb) << "handlePropertyNotifyEvent called, atom:" << event->atom << "state:" << event->state;
     connection()->setTime(event->time);
 
     const bool propertyDeleted = event->state == XCB_PROPERTY_DELETE;
 
     if (event->atom == atom(QXcbAtom::D_QXCBATOM_WRAPPER(_NET_WM_STATE)) || event->atom == atom(QXcbAtom::D_QXCBATOM_WRAPPER(WM_STATE))) {
-        if (propertyDeleted)
+        if (propertyDeleted) {
+            qCDebug(dxcb) << "Property deleted, skipping update";
             return;
+        }
 
+        qCDebug(dxcb) << "Updating window state";
         return updateWindowState();
     } else if (event->atom == atom(QXcbAtom::D_QXCBATOM_WRAPPER(_NET_FRAME_EXTENTS))) {
+        qCDebug(dxcb) << "Setting dirty frame margins";
         m_dirtyFrameMargins = true;
     } else if (event->atom == atom(QXcbAtom::D_QXCBATOM_WRAPPER(_NET_WM_WINDOW_TYPE))) {
+        qCDebug(dxcb) << "Updating window types";
         return updateWindowTypes();
     } else if (event->atom == Utility::internAtom("_NET_WM_DESKTOP")) {
+        qCDebug(dxcb) << "Updating WM desktop";
         return updateWmDesktop();
     } else if (event->atom == QXcbAtom::D_QXCBATOM_WRAPPER(_NET_WM_NAME)) {
+        qCDebug(dxcb) << "Updating title";
         return updateTitle();
     } else if (event->atom == QXcbAtom::D_QXCBATOM_WRAPPER(WM_CLASS)) {
+        qCDebug(dxcb) << "Updating WM class";
         return updateWmClass();
     }
 }
 
 QNativeWindow *DForeignPlatformWindow::toWindow()
 {
+    qCDebug(dxcb) << "toWindow called, returning nullptr to prevent drag/drop issues";
     // 重写返回空，目的是防止QXcbConnection::platformWindowFromId接口能返回一个正常的QXcbWindow对象
     // 这样会导致QXcbDrag中将本窗口认为是自己窗口的窗口，从而导致drag/drop事件没有通过x11发送给对应窗口
     // 而是直接走了内部事件处理流程
@@ -219,6 +260,7 @@ QNativeWindow *DForeignPlatformWindow::toWindow()
 
 void DForeignPlatformWindow::create()
 {
+    qCDebug(dxcb) << "create called, m_window:" << m_window;
     const quint32 mask = XCB_CW_EVENT_MASK;
     const quint32 values[] = {
         // XCB_CW_EVENT_MASK
@@ -231,6 +273,7 @@ void DForeignPlatformWindow::create()
 
 void DForeignPlatformWindow::destroy()
 {
+    qCDebug(dxcb) << "destroy called, m_window:" << m_window;
     connection()->removeWindowEventListener(m_window);
 }
 

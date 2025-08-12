@@ -8,12 +8,19 @@
 #include "utility.h"
 
 #include <private/qwindow_p.h>
+#include <QLoggingCategory>
 
 #ifdef Q_OS_LINUX
 #include "dxcbwmsupport.h"
 
 #include <QX11Info>
 #include <X11/Xlib.h>
+#endif
+
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
 #endif
 
 #define HOOK_VFPTR(Fun) VtableHook::overrideVfptrFun(window, &QPlatformWindow::Fun, this, &DPlatformWindowHook::Fun)
@@ -29,6 +36,7 @@ DPlatformWindowHook::DPlatformWindowHook(QNativeWindow *window)
     : QObject(window->window())
     , nativeWindow(window)
 {
+    qCDebug(dxcb) << "DPlatformWindowHook constructor called, window:" << window;
     mapped[window] = this;
 
     HOOK_VFPTR(setGeometry);
@@ -50,17 +58,20 @@ DPlatformWindowHook::DPlatformWindowHook(QNativeWindow *window)
 
 DPlatformWindowHook::~DPlatformWindowHook()
 {
+    qCDebug(dxcb) << "DPlatformWindowHook destructor called";
     mapped.remove(nativeWindow);
     VtableHook::clearGhostVtable(static_cast<QPlatformWindow*>(nativeWindow));
 }
 
 DPlatformWindowHook *DPlatformWindowHook::me() const
 {
+    qCDebug(dxcb) << "me called";
     return getHookByWindow(window());
 }
 
 void DPlatformWindowHook::setGeometry(const QRect &rect)
 {
+    qCDebug(dxcb) << "setGeometry called, rect:" << rect;
     const QMargins &margins = me()->windowMargins;
 
     emit me()->windowGeometryAboutChanged(rect);
@@ -69,6 +80,7 @@ void DPlatformWindowHook::setGeometry(const QRect &rect)
 
 QRect DPlatformWindowHook::geometry() const
 {
+    qCDebug(dxcb) << "geometry called";
     const QMargins &margins = me()->windowMargins;
 
 //    qDebug() << __FUNCTION__ << CALL::geometry() << CALL::window()->isVisible();
@@ -78,26 +90,31 @@ QRect DPlatformWindowHook::geometry() const
 
 QMargins DPlatformWindowHook::frameMargins() const
 {
+    qCDebug(dxcb) << "frameMargins called";
     return QMargins();
 }
 
 void DPlatformWindowHook::setParent(const QPlatformWindow *window)
 {
+    qCDebug(dxcb) << "setParent called";
     CALL::setParent(window);
 }
 
 void DPlatformWindowHook::setWindowTitle(const QString &title)
 {
+    qCDebug(dxcb) << "setWindowTitle called, title:" << title;
     return CALL::setWindowTitle(title);
 }
 
 void DPlatformWindowHook::setWindowIcon(const QIcon &icon)
 {
+    qCDebug(dxcb) << "setWindowIcon called";
     return CALL::setWindowIcon(icon);
 }
 
 QPoint DPlatformWindowHook::mapToGlobal(const QPoint &pos) const
 {
+    qCDebug(dxcb) << "mapToGlobal called, pos:" << pos;
     DPlatformWindowHook *me = DPlatformWindowHook::me();
 
     return CALL::mapToGlobal(pos + QPoint(me->windowMargins.left(), me->windowMargins.top()));
@@ -105,6 +122,7 @@ QPoint DPlatformWindowHook::mapToGlobal(const QPoint &pos) const
 
 QPoint DPlatformWindowHook::mapFromGlobal(const QPoint &pos) const
 {
+    qCDebug(dxcb) << "mapFromGlobal called, pos:" << pos;
     DPlatformWindowHook *me = DPlatformWindowHook::me();
 
     return CALL::mapFromGlobal(pos - QPoint(me->windowMargins.left(), me->windowMargins.top()));
@@ -112,6 +130,7 @@ QPoint DPlatformWindowHook::mapFromGlobal(const QPoint &pos) const
 
 void DPlatformWindowHook::setMask(const QRegion &region)
 {
+    qCDebug(dxcb) << "setMask called, region:" << region;
     QRegion tmp_region;
 
     const QMargins &margins = me()->windowMargins;
@@ -136,14 +155,18 @@ void DPlatformWindowHook::setMask(const QRegion &region)
 #ifdef Q_OS_LINUX
 void DPlatformWindowHook::setWindowState(Qt::WindowState state)
 {
+    qCDebug(dxcb) << "setWindowState called, state:" << state;
     DQNativeWindow *window = static_cast<DQNativeWindow*>(this->window());
 
-    if (window->m_windowState == state)
+    if (window->m_windowState == state) {
+        qCDebug(dxcb) << "Window state unchanged";
         return;
+    }
 
     if (state == Qt::WindowMinimized
             && (window->m_windowState == Qt::WindowMaximized
                 || window->m_windowState == Qt::WindowFullScreen)) {
+        qCDebug(dxcb) << "Minimizing from maximized/fullscreen state";
         window->changeNetWmState(true, Utility::internAtom("_NET_WM_STATE_HIDDEN"));
         XIconifyWindow(QX11Info::display(), window->m_window, QX11Info::appScreen());
         window->connection()->sync();
@@ -156,6 +179,7 @@ void DPlatformWindowHook::setWindowState(Qt::WindowState state)
 
 void DPlatformWindowHook::setVisible(bool visible)
 {
+    qCDebug(dxcb) << "setVisible called, visible:" << visible;
     if (!visible) {
         return CALL::setVisible(visible);
     }
@@ -166,6 +190,7 @@ void DPlatformWindowHook::setVisible(bool visible)
     Utility::QtMotifWmHints mwmhints = Utility::getMotifWmHints(window->m_window);
 
     if (window->window()->modality() != Qt::NonModal) {
+        qCDebug(dxcb) << "Setting modal window hints";
         switch (window->window()->modality()) {
         case Qt::WindowModal:
             mwmhints.input_mode = DXcbWMSupport::MWM_INPUT_PRIMARY_APPLICATION_MODAL;
@@ -182,6 +207,7 @@ void DPlatformWindowHook::setVisible(bool visible)
     }
 
     if (window->windowMinimumSize() == window->windowMaximumSize()) {
+        qCDebug(dxcb) << "Setting fixed size window hints";
         // fixed size, remove the resize handle (since mwm/dtwm
         // isn't smart enough to do it itself)
         mwmhints.flags |= DXcbWMSupport::MWM_HINTS_FUNCTIONS;
@@ -213,8 +239,10 @@ void DPlatformWindowHook::setVisible(bool visible)
 
 void DPlatformWindowHook::requestActivateWindow()
 {
+    qCDebug(dxcb) << "requestActivateWindow called";
     if (!window()->isExposed() && !DXcbWMSupport::instance()->hasComposite()
             && window()->window()->windowState() == Qt::WindowMinimized) {
+        qCDebug(dxcb) << "Mapping minimized window";
         Q_XCB_CALL(xcb_map_window(window()->xcb_connection(), window()->winId()));
     }
 
@@ -224,6 +252,7 @@ void DPlatformWindowHook::requestActivateWindow()
 
 void DPlatformWindowHook::propagateSizeHints()
 {
+    qCDebug(dxcb) << "propagateSizeHints called";
     QWindow *win = window()->window();
     QWindowPrivate *winp = qt_window_private(win);
 
@@ -246,14 +275,17 @@ void DPlatformWindowHook::propagateSizeHints()
 
 DPlatformWindowHook *DPlatformWindowHook::getHookByWindow(const QPlatformWindow *window)
 {
+    qCDebug(dxcb) << "getHookByWindow called, window:" << window;
     return mapped.value(window);
 }
 
 void DPlatformWindowHook::setWindowMargins(const QMargins &margins, bool propagateSizeHints)
 {
+    qCDebug(dxcb) << "setWindowMargins called, margins:" << margins << "propagateSizeHints:" << propagateSizeHints;
     windowMargins = margins;
 
     if (!propagateSizeHints) {
+        qCDebug(dxcb) << "Skipping size hints propagation";
         return;
     }
 

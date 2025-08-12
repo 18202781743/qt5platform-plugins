@@ -17,30 +17,45 @@
 #include <QOpenGLFunctions>
 #include <QPainterPathStroker>
 #include <QDebug>
+#include <QLoggingCategory>
+
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
 
 DPP_BEGIN_NAMESPACE
 
 DPlatformOpenGLContextHelper::DPlatformOpenGLContextHelper()
 {
-
+    qCDebug(dxcb) << "Creating DPlatformOpenGLContextHelper";
 }
 
 bool DPlatformOpenGLContextHelper::addOpenGLContext(QOpenGLContext *object, QPlatformOpenGLContext *context)
 {
+    qCDebug(dxcb) << "Adding OpenGL context, object:" << object << "context:" << context;
     Q_UNUSED(object)
 
-    return VtableHook::overrideVfptrFun(context, &QPlatformOpenGLContext::swapBuffers, this, &DPlatformOpenGLContextHelper::swapBuffers);
+    const auto &result = VtableHook::overrideVfptrFun(context, &QPlatformOpenGLContext::swapBuffers, this, &DPlatformOpenGLContextHelper::swapBuffers);
+    qCDebug(dxcb) << "OpenGL context override result:" << result;
+    return result;
 }
 
 static void drawCornerImage(const QImage &source, const QPoint &source_offset, QPainter *dest, const QPainterPath &dest_path, QOpenGLFunctions *glf)
 {
-    if (source.isNull())
+    qCDebug(dxcb) << "Drawing corner image, source size:" << source.size() << "offset:" << source_offset;
+    if (source.isNull()) {
+        qCDebug(dxcb) << "Source image is null, skipping";
         return;
+    }
 
     const QRectF &br = dest_path.boundingRect();
 
-    if (br.isEmpty())
+    if (br.isEmpty()) {
+        qCDebug(dxcb) << "Bounding rect is empty, skipping";
         return;
+    }
 
     int height = dest->device()->height();
     QBrush brush(source);
@@ -58,22 +73,30 @@ static void drawCornerImage(const QImage &source, const QPoint &source_offset, Q
     pa.fillPath(dest_path.translated(-br.topLeft()), brush);
     pa.end();
     dest->drawImage(br.topLeft(), tmp_image);
+    qCDebug(dxcb) << "Corner image drawn successfully";
 }
 
 void DPlatformOpenGLContextHelper::swapBuffers(QPlatformSurface *surface)
 {
-    if (!DWMSupport::instance()->hasWindowAlpha())
+    qCDebug(dxcb) << "Swapping buffers for surface:" << surface;
+    if (!DWMSupport::instance()->hasWindowAlpha()) {
+        qCDebug(dxcb) << "Window does not have alpha, skipping custom swap";
         goto end;
+    }
 
     if (surface->surface()->surfaceClass() == QSurface::Window) {
         QWindow *window = static_cast<QWindow*>(surface->surface());
         DPlatformWindowHelper *window_helper = DPlatformWindowHelper::mapped.value(window->handle());
 
-        if (!window_helper)
+        if (!window_helper) {
+            qCDebug(dxcb) << "No window helper found, skipping";
             goto end;
+        }
 
-        if (!window_helper->m_isUserSetClipPath && window_helper->getWindowRadius() <= 0)
+        if (!window_helper->m_isUserSetClipPath && window_helper->getWindowRadius() <= 0) {
+            qCDebug(dxcb) << "No user clip path and no window radius, skipping";
             goto end;
+        }
 
         qreal device_pixel_ratio = window_helper->m_nativeWindow->window()->devicePixelRatio();
         QPainterPath path;
@@ -83,8 +106,10 @@ void DPlatformOpenGLContextHelper::swapBuffers(QPlatformSurface *surface)
         path.addRect(QRect(QPoint(0, 0), window_size));
         path -= real_clip_path;
 
-        if (path.isEmpty())
+        if (path.isEmpty()) {
+            qCDebug(dxcb) << "Path is empty after clipping, skipping";
             goto end;
+        }
 
         QOpenGLPaintDevice device(window_size);
         QPainter pa_device(&device);
@@ -92,11 +117,13 @@ void DPlatformOpenGLContextHelper::swapBuffers(QPlatformSurface *surface)
         pa_device.setCompositionMode(QPainter::CompositionMode_Source);
 
         if (window_helper->m_isUserSetClipPath) {
+            qCDebug(dxcb) << "Using user set clip path";
             const QRect &content_rect = QRect(window_helper->m_frameWindow->contentOffsetHint() * device_pixel_ratio, window_size);
             QBrush border_brush(window_helper->m_frameWindow->platformBackingStore->toImage());
             border_brush.setTransform(QTransform(1, 0, 0, 1, -content_rect.x(), -content_rect.y()));
             pa_device.fillPath(path, border_brush);
         } else {
+            qCDebug(dxcb) << "Using window radius for clipping";
             const QImage &frame_image = window_helper->m_frameWindow->platformBackingStore->toImage();
             const QRect background_rect(QPoint(0, 0), window_size);
             const QPoint offset = window_helper->m_frameWindow->contentOffsetHint() * device_pixel_ratio;
@@ -105,22 +132,26 @@ void DPlatformOpenGLContextHelper::swapBuffers(QPlatformSurface *surface)
             QOpenGLFunctions *gl_funcs = QOpenGLContext::currentContext()->functions();
 
             // draw top-left
+            qCDebug(dxcb) << "Drawing top-left corner";
             corner_path.addRect(corner_rect);
             drawCornerImage(frame_image, offset, &pa_device, corner_path - real_clip_path, gl_funcs);
 
             // draw top-right
+            qCDebug(dxcb) << "Drawing top-right corner";
             corner_rect.moveTopRight(background_rect.topRight());
             corner_path = QPainterPath();
             corner_path.addRect(corner_rect);
             drawCornerImage(frame_image, offset, &pa_device, corner_path - real_clip_path, gl_funcs);
 
             // draw bottom-left
+            qCDebug(dxcb) << "Drawing bottom-left corner";
             corner_rect.moveBottomLeft(background_rect.bottomLeft());
             corner_path = QPainterPath();
             corner_path.addRect(corner_rect);
             drawCornerImage(frame_image, offset, &pa_device, corner_path - real_clip_path, gl_funcs);
 
             // draw bottom-right
+            qCDebug(dxcb) << "Drawing bottom-right corner";
             corner_rect.moveBottomRight(background_rect.bottomRight());
             corner_path = QPainterPath();
             corner_path.addRect(corner_rect);
@@ -128,9 +159,11 @@ void DPlatformOpenGLContextHelper::swapBuffers(QPlatformSurface *surface)
         }
 
         pa_device.end();
+        qCDebug(dxcb) << "Custom swap buffers completed";
     }
 
 end:
+    qCDebug(dxcb) << "Calling original swapBuffers";
     VtableHook::callOriginalFun(this->context(), &QPlatformOpenGLContext::swapBuffers, surface);
 }
 

@@ -26,37 +26,55 @@
 #include <QVariant>
 #include <QSet>
 #include <QColor>
+#include <QLoggingCategory>
 
 #include <vector>
 #include <algorithm>
 #include <memory>
 
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxsettings, "dtk.qpa.xsettings", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxsettings, "dtk.qpa.xsettings");
+#endif
+
 static xcb_atom_t internAtom(xcb_connection_t *conn, const char *name)
 {
-    if (!name || *name == 0)
+    qCDebug(dxsettings) << "internAtom called, name:" << name;
+    if (!name || *name == 0) {
+        qCDebug(dxsettings) << "Empty atom name, returning XCB_NONE";
         return XCB_NONE;
+    }
 
     xcb_intern_atom_cookie_t cookie = xcb_intern_atom(conn, false, strlen(name), name);
     xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(conn, cookie, 0);
 
-    if (!reply)
+    if (!reply) {
+        qCDebug(dxsettings) << "No reply for atom:" << name;
         return XCB_NONE;
+    }
 
     xcb_atom_t atom = reply->atom;
     free(reply);
 
+    qCDebug(dxsettings) << "Atom" << name << "=" << atom;
     return atom;
 }
 
 static QByteArray atomName(xcb_connection_t *conn, xcb_atom_t atom)
 {
+    qCDebug(dxsettings) << "atomName called, atom:" << atom;
     xcb_get_atom_name_cookie_t cookie = xcb_get_atom_name(conn, atom);
     xcb_get_atom_name_reply_t *reply = xcb_get_atom_name_reply(conn, cookie, nullptr);
 
-    if (!reply)
+    if (!reply) {
+        qCDebug(dxsettings) << "No reply for atom:" << atom;
         return nullptr;
+    }
 
-    return QByteArray(xcb_get_atom_name_name(reply), xcb_get_atom_name_name_length(reply));
+    QByteArray result(xcb_get_atom_name_name(reply), xcb_get_atom_name_name_length(reply));
+    qCDebug(dxsettings) << "Atom name:" << result;
+    return result;
 }
 
 #define Q_XCB_REPLY_CONNECTION_ARG(connection, ...) connection
@@ -153,7 +171,9 @@ DXcbConnectionGrabber::~DXcbConnectionGrabber()
 
 void DXcbConnectionGrabber::release()
 {
+    qCDebug(dxsettings) << "DXcbConnectionGrabber::release called, m_connection:" << m_connection;
     if (m_connection) {
+        qCDebug(dxsettings) << "Ungrabbing server and flushing connection";
         xcb_ungrab_server(m_connection);
         // 必须保证xserver立即处理此请求, 因为xcb是异步请求的
         // 当前线程中可能还存在其它的xcb connection，如果在
@@ -162,6 +182,8 @@ void DXcbConnectionGrabber::release()
         // 此xcb_ungrab_server的调用就无法到达xserver，于是就形成了死锁。
         xcb_flush(m_connection);
         m_connection = 0;
+    } else {
+        qCDebug(dxsettings) << "No connection to release";
     }
 }
 
@@ -514,13 +536,15 @@ QMultiHash<xcb_window_t, DXcbXSettings*> DXcbXSettingsPrivate::mapped;
 DXcbXSettings::DXcbXSettings(xcb_connection_t *connection, const QByteArray &property)
     : DXcbXSettings(connection, 0, property)
 {
-
+    qCDebug(dxsettings) << "DXcbXSettings constructor called with connection and property:" << property;
 }
 
 DXcbXSettings::DXcbXSettings(xcb_connection_t *connection, xcb_window_t setting_window, const QByteArray &property)
     : d_ptr(new DXcbXSettingsPrivate(connection, property, this))
 {
+    qCDebug(dxsettings) << "DXcbXSettings constructor called, setting_window:" << setting_window << "property:" << property;
     if (!setting_window) {
+        qCDebug(dxsettings) << "Using default setting window";
         setting_window = d_ptr->_xsettings_owner;
     }
 
@@ -530,11 +554,12 @@ DXcbXSettings::DXcbXSettings(xcb_connection_t *connection, xcb_window_t setting_
 DXcbXSettings::DXcbXSettings(xcb_window_t setting_window, const QByteArray &property)
     : DXcbXSettings(nullptr, setting_window, property)
 {
-
+    qCDebug(dxsettings) << "DXcbXSettings constructor called with setting_window:" << setting_window << "property:" << property;
 }
 
 DXcbXSettings::~DXcbXSettings()
 {
+    qCDebug(dxsettings) << "DXcbXSettings destructor called";
     DXcbXSettingsPrivate::mapped.remove(d_ptr->x_settings_window, this);
     delete d_ptr;
     d_ptr = 0;
@@ -542,6 +567,7 @@ DXcbXSettings::~DXcbXSettings()
 
 xcb_window_t DXcbXSettings::getOwner(xcb_connection_t *conn, int screenNumber)
 {
+    qCDebug(dxsettings) << "getOwner called, screenNumber:" << screenNumber;
     struct XcbConnectionDeleter
     {
         static inline void cleanup(xcb_connection_t *conn)
@@ -553,10 +579,13 @@ xcb_window_t DXcbXSettings::getOwner(xcb_connection_t *conn, int screenNumber)
     QScopedPointer<xcb_connection_t, XcbConnectionDeleter> tmp_conn;
 
     if (!conn) {
+        qCDebug(dxsettings) << "No connection provided, creating new connection";
         conn = xcb_connect(qgetenv("DISPLAY"), &screenNumber);
 
-        if (!conn)
+        if (!conn) {
+            qCDebug(dxsettings) << "Failed to connect to X server";
             return XCB_NONE;
+        }
 
         tmp_conn.reset(conn);
     }
@@ -568,16 +597,21 @@ xcb_window_t DXcbXSettings::getOwner(xcb_connection_t *conn, int screenNumber)
                                   true,
                                   settings_atom_for_screen.length(),
                                   settings_atom_for_screen.constData());
-    if (!atom_reply)
+    if (!atom_reply) {
+        qCDebug(dxsettings) << "Failed to get atom reply";
         return XCB_NONE;
+    }
 
     xcb_atom_t selection_owner_atom = atom_reply->atom;
 
     auto selection_result = Q_XCB_REPLY(xcb_get_selection_owner,
                                         conn, selection_owner_atom);
-    if (!selection_result)
+    if (!selection_result) {
+        qCDebug(dxsettings) << "Failed to get selection owner";
         return XCB_NONE;
+    }
 
+    qCDebug(dxsettings) << "Selection owner:" << selection_result->owner;
     return selection_result->owner;
 }
 
@@ -677,31 +711,40 @@ bool DXcbXSettings::handleClientMessageEvent(const xcb_client_message_event_t *e
 
 void DXcbXSettings::clearSettings(xcb_window_t setting_window)
 {
+    qCDebug(dxsettings) << "clearSettings called, setting_window:" << setting_window;
     if (DXcbXSettings *self = DXcbXSettingsPrivate::mapped.value(setting_window)) {
+        qCDebug(dxsettings) << "Found mapped settings, deleting property";
         xcb_delete_property(self->d_ptr->connection, setting_window, self->d_ptr->x_settings_atom);
+    } else {
+        qCDebug(dxsettings) << "No mapped settings found for window:" << setting_window;
     }
 }
 
 void DXcbXSettings::registerCallbackForProperty(const QByteArray &property, DXcbXSettings::PropertyChangeFunc func, void *handle)
 {
+    qCDebug(dxsettings) << "registerCallbackForProperty called, property:" << property << "handle:" << handle;
     Q_D(DXcbXSettings);
     d->settings[property].addCallback(func,handle);
 }
 
 void DXcbXSettings::removeCallbackForHandle(const QByteArray &property, void *handle)
 {
+    qCDebug(dxsettings) << "removeCallbackForHandle called, property:" << property << "handle:" << handle;
     Q_D(DXcbXSettings);
     auto &callbacks = d->settings[property].callback_links;
 
     auto isCallbackForHandle = [handle](const DXcbXSettingsCallback &cb) { return cb.handle == handle; };
 
+    const size_t initialSize = callbacks.size();
     callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(),
                                    isCallbackForHandle),
                     callbacks.end());
+    qCDebug(dxsettings) << "Removed" << (initialSize - callbacks.size()) << "callbacks";
 }
 
 void DXcbXSettings::removeCallbackForHandle(void *handle)
 {
+    qCDebug(dxsettings) << "removeCallbackForHandle called for all properties, handle:" << handle;
     Q_D(DXcbXSettings);
     for (QHash<QByteArray, DXcbXSettingsPropertyValue>::const_iterator it = d->settings.cbegin();
          it != d->settings.cend(); ++it) {
@@ -709,11 +752,14 @@ void DXcbXSettings::removeCallbackForHandle(void *handle)
     }
 
     auto isCallbackForHandle = [handle](const DXcbXSettingsCallback &cb) { return cb.handle == handle; };
+    const size_t initialSize = d->callback_links.size();
     d->callback_links.erase(std::remove_if(d->callback_links.begin(), d->callback_links.end(), isCallbackForHandle));
+    qCDebug(dxsettings) << "Removed" << (initialSize - d->callback_links.size()) << "global callbacks";
 }
 
 void DXcbXSettings::registerSignalCallback(DXcbXSettings::SignalFunc func, void *handle)
 {
+    qCDebug(dxsettings) << "registerSignalCallback called, handle:" << handle;
     Q_D(DXcbXSettings);
     DXcbXSettingsSignalCallback callback = { func, handle };
     d->signal_callback_links.push_back(callback);
@@ -721,13 +767,17 @@ void DXcbXSettings::registerSignalCallback(DXcbXSettings::SignalFunc func, void 
 
 void DXcbXSettings::removeSignalCallback(void *handle)
 {
+    qCDebug(dxsettings) << "removeSignalCallback called, handle:" << handle;
     Q_D(DXcbXSettings);
     auto isCallbackForHandle = [handle](const DXcbXSettingsSignalCallback &cb) { return cb.handle == handle; };
+    const size_t initialSize = d->signal_callback_links.size();
     d->signal_callback_links.erase(std::remove_if(d->signal_callback_links.begin(), d->signal_callback_links.end(), isCallbackForHandle));
+    qCDebug(dxsettings) << "Removed" << (initialSize - d->signal_callback_links.size()) << "signal callbacks";
 }
 
 void DXcbXSettings::emitSignal(const QByteArray &signal, qint32 data1, qint32 data2)
 {
+    qCDebug(dxsettings) << "emitSignal called, signal:" << signal << "data1:" << data1 << "data2:" << data2;
     Q_D(const DXcbXSettings);
     emitSignal(d->connection, d->x_settings_window, d->x_settings_atom, signal, data1, data2);
 }
@@ -735,9 +785,11 @@ void DXcbXSettings::emitSignal(const QByteArray &signal, qint32 data1, qint32 da
 void DXcbXSettings::emitSignal(xcb_connection_t *conn, xcb_window_t window, xcb_atom_t property,
                                const QByteArray &signal, qint32 data1, qint32 data2)
 {
+    qCDebug(dxsettings) << "emitSignal called, window:" << window << "property:" << property << "signal:" << signal << "data1:" << data1 << "data2:" << data2;
     xcb_window_t xsettings_owner = DXcbXSettingsPrivate::_xsettings_owner;
 
     if (!xsettings_owner) {
+        qCDebug(dxsettings) << "No xsettings owner, skipping signal emission";
         return;
     }
 
@@ -772,23 +824,31 @@ void DXcbXSettings::emitSignal(xcb_connection_t *conn, xcb_window_t window, xcb_
 
 QVariant DXcbXSettings::setting(const QByteArray &property) const
 {
+    qCDebug(dxsettings) << "setting called, property:" << property;
     Q_D(const DXcbXSettings);
-    return d->settings.value(property).value;
+    const auto &result = d->settings.value(property).value;
+    qCDebug(dxsettings) << "Setting value:" << result;
+    return result;
 }
 
 void DXcbXSettings::setSetting(const QByteArray &property, const QVariant &value)
 {
+    qCDebug(dxsettings) << "setSetting called, property:" << property << "value:" << value;
     Q_D(DXcbXSettings);
 
     DXcbXSettingsPropertyValue &xvalue = d->settings[property];
 
-    if (xvalue.value == value)
+    if (xvalue.value == value) {
+        qCDebug(dxsettings) << "Setting value unchanged, skipping update";
         return;
+    }
 
+    qCDebug(dxsettings) << "Updating setting value";
     d->updateValue(xvalue, property, value, xvalue.last_change_serial + 1);
 
     // 移除无效的属性
     if (!value.isValid()) {
+        qCDebug(dxsettings) << "Removing invalid property:" << property;
         d->settings.remove(property);
     }
 
@@ -799,12 +859,16 @@ void DXcbXSettings::setSetting(const QByteArray &property, const QVariant &value
 
 QByteArrayList DXcbXSettings::settingKeys() const
 {
+    qCDebug(dxsettings) << "settingKeys called";
     Q_D(const DXcbXSettings);
-    return d->settings.keys();
+    const auto &result = d->settings.keys();
+    qCDebug(dxsettings) << "Setting keys count:" << result.size();
+    return result;
 }
 
 void DXcbXSettings::registerCallback(DXcbXSettings::PropertyChangeFunc func, void *handle)
 {
+    qCDebug(dxsettings) << "registerCallback called, handle:" << handle;
     Q_D(DXcbXSettings);
     DXcbXSettingsCallback callback = { func, handle };
     d->callback_links.push_back(callback);

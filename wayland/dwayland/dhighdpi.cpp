@@ -43,6 +43,7 @@ static void init()
 
 void DHighDpi::init()
 {
+    qCDebug(dwhdpi) << "init called";
     if (QGuiApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
             // 可以禁用此行为
             || qEnvironmentVariableIsSet("D_DXCB_DISABLE_OVERRIDE_HIDPI")
@@ -50,6 +51,7 @@ void DHighDpi::init()
             || !dXSettings->getOwner()
             || (qEnvironmentVariableIsSet("QT_SCALE_FACTOR_ROUNDING_POLICY")
                 && qgetenv("QT_SCALE_FACTOR_ROUNDING_POLICY") != "PassThrough")) {
+        qCDebug(dwhdpi) << "High DPI scaling disabled, returning early";
         return;
     }
 
@@ -77,17 +79,21 @@ void DHighDpi::init()
     QObject::connect(qApp, &QGuiApplication::screenRemoved, &DHighDpi::removeScreenFactorCache);
 
     active = HookOverride(&QtWaylandClient::QWaylandScreen::logicalDpi, logicalDpi);
+    qCDebug(dwhdpi) << "High DPI hook installed, active:" << active;
  }
 
 bool DHighDpi::isActive()
 {
+    qCDebug(dwhdpi) << "isActive called, active:" << active;
     return active;
 }
 
 bool DHighDpi::overrideBackingStore()
 {
+    qCDebug(dwhdpi) << "overrideBackingStore called";
     // 默认不开启，会降低绘图效率
     static bool enabled = qEnvironmentVariableIsSet("D_DXCB_HIDPI_BACKINGSTORE");
+    qCDebug(dwhdpi) << "Backing store override enabled:" << enabled;
     return enabled;
 }
 
@@ -145,18 +151,23 @@ QDpi DHighDpi::logicalDpi(QtWaylandClient::QWaylandScreen *s)
 
 qreal DHighDpi::devicePixelRatio(QPlatformWindow *w)
 {
+    qCDebug(dwhdpi) << "devicePixelRatio called for window:" << w;
     qreal base_factor = QHighDpiScaling::factor(w->screen());
-    return qCeil(base_factor) / base_factor;
+    const auto &result = qCeil(base_factor) / base_factor;
+    qCDebug(dwhdpi) << "Device pixel ratio:" << result << "base_factor:" << base_factor;
+    return result;
 }
 
 void DHighDpi::removeScreenFactorCache(QScreen *screen)
 {
+    qCDebug(dwhdpi) << "removeScreenFactorCache called, screen:" << screen;
     // 清理过期的屏幕缩放值
 #if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
     if (screen) {
          qCDebug(dwhdpi()) << "remove screen from cache" << screen->model() << screen->devicePixelRatio();
         screenFactorMap.remove(screen->handle());
     } else {
+        qCDebug(dwhdpi) << "Clearing all screen factor cache";
         screenFactorMap.clear();
 #else
     {

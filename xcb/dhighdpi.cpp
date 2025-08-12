@@ -15,6 +15,13 @@
 #include <private/qguiapplication_p.h>
 #include <QGuiApplication>
 #include <QDebug>
+#include <QLoggingCategory>
+
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
 
 DPP_BEGIN_NAMESPACE
 
@@ -24,11 +31,13 @@ QHash<QPlatformScreen*, qreal> DHighDpi::screenFactorMap;
 #endif
 QPointF DHighDpi::fromNativePixels(const QPointF &pixelPoint, const QWindow *window)
 {
+    qCDebug(dxcb) << "fromNativePixels called, pixelPoint:" << pixelPoint;
     return QHighDpi::fromNativePixels(pixelPoint, window);
 }
 
 inline static void init()
 {
+    qCDebug(dxcb) << "DHighDpi init function called";
     // 禁用platform theme中的缩放机制
     // 当DHighDpi存在时不应该再使用这个过时的机制
     qputenv("D_DISABLE_RT_SCREEN_SCALE", "1");
@@ -39,6 +48,7 @@ inline static void init()
 Q_CONSTRUCTOR_FUNCTION(init)
 void DHighDpi::init()
 {
+    qCDebug(dxcb) << "DHighDpi::init called";
     if (qEnvironmentVariableIsSet("D_DXCB_DISABLE_OVERRIDE_HIDPI")
             // 无有效的xsettings时禁用
             || !DXcbXSettings::getOwner()
@@ -46,8 +56,10 @@ void DHighDpi::init()
             || QGuiApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
 #endif
         ) {
+        qCDebug(dxcb) << "High DPI override disabled";
         // init函数可能会被重复调用, 此处应该清理VtableHook
         if (active) {
+            qCDebug(dxcb) << "Cleaning up VtableHook";
 #if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
             VtableHook::resetVfptrFun(&QXcbScreen::pixelDensity);
 #endif
@@ -57,11 +69,13 @@ void DHighDpi::init()
         return;
     }
 
-    // 设置为完全控制缩放比例，避免被Qt“4舍5入”了缩放比
+    qCDebug(dxcb) << "Setting up High DPI override";
+    // 设置为完全控制缩放比例，避免被Qt"4舍5入"了缩放比
     qputenv("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough");
 
     // 强制开启使用DXCB的缩放机制，此时移除会影响此功能的所有Qt环境变量
     if (qEnvironmentVariableIsSet("D_DXCB_FORCE_OVERRIDE_HIDPI")) {
+        qCDebug(dxcb) << "Force override HIDPI enabled, unsetting Qt environment variables";
         qunsetenv("QT_AUTO_SCREEN_SCALE_FACTOR");
         qunsetenv("QT_SCALE_FACTOR");
         qunsetenv("QT_SCREEN_SCALE_FACTORS");
@@ -72,6 +86,7 @@ void DHighDpi::init()
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     // Qt6中高DPI缩放总是启用的，无需设置AA_EnableHighDpiScaling
     if (!QGuiApplication::testAttribute(Qt::AA_EnableHighDpiScaling)) {
+        qCDebug(dxcb) << "Enabling High DPI scaling attribute";
         QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
         QHighDpiScaling::initHighDpiScaling();
     }
@@ -81,22 +96,33 @@ void DHighDpi::init()
     active = VtableHook::overrideVfptrFun(&QXcbScreen::pixelDensity, pixelDensity);
 
     if (active) {
+        qCDebug(dxcb) << "Successfully overrode pixelDensity, now overriding logicalDpi";
         VtableHook::overrideVfptrFun(&QXcbScreen::logicalDpi, logicalDpi);
+    } else {
+        qCDebug(dxcb) << "Failed to override pixelDensity";
     }
 #else
     active = VtableHook::overrideVfptrFun(&QXcbScreen::logicalDpi, logicalDpi);
+    if (active) {
+        qCDebug(dxcb) << "Successfully overrode logicalDpi";
+    } else {
+        qCDebug(dxcb) << "Failed to override logicalDpi";
+    }
 #endif
 }
 
 bool DHighDpi::isActive()
 {
+    qCDebug(dxcb) << "isActive called, returning:" << active;
     return active;
 }
 
 bool DHighDpi::overrideBackingStore()
 {
+    qCDebug(dxcb) << "overrideBackingStore called";
     // 默认不开启，会降低绘图效率
     static bool enabled = qEnvironmentVariableIsSet("D_DXCB_HIDPI_BACKINGSTORE");
+    qCDebug(dxcb) << "Backing store override enabled:" << enabled;
     return enabled;
 }
 

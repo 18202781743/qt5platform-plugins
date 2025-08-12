@@ -28,10 +28,13 @@ static std::once_flag exitFlag;
 
 bool VtableHook::copyVtable(quintptr **obj)
 {
+    qCDebug(vtableHook) << "copyVtable called, obj:" << obj;
     int vtable_size = getVtableSize(obj);
 
-    if (vtable_size == 0)
+    if (vtable_size == 0) {
+        qCDebug(vtableHook) << "Vtable size is 0, returning false";
         return false;
+    }
 
 // 多开辟一个元素, 新的虚表结构如下:
     // 假设原虚表内存布局如下(考虑多继承):
@@ -91,8 +94,11 @@ bool VtableHook::copyVtable(quintptr **obj)
 
 bool VtableHook::clearGhostVtable(const void *obj)
 {
-    if (!objToOriginalVfptr.remove((quintptr **)obj)) // Uninitialized memory may have values, for resetVtable
+    qCDebug(vtableHook) << "clearGhostVtable called, obj:" << obj;
+    if (!objToOriginalVfptr.remove((quintptr **)obj)) { // Uninitialized memory may have values, for resetVtable
+        qCDebug(vtableHook) << "Failed to remove from objToOriginalVfptr";
         return false;
+    }
     objDestructFun.remove(obj);
 
     quintptr *vtable = objToGhostVfptr.take(obj);
@@ -108,7 +114,9 @@ bool VtableHook::clearGhostVtable(const void *obj)
 
 void VtableHook::clearAllGhostVtable()
 {
+    qCDebug(vtableHook) << "clearAllGhostVtable called";
     const QList<const void *> _objects = objToGhostVfptr.keys();
+    qCDebug(vtableHook) << "Clearing" << _objects.size() << "ghost vtables";
 
     for (const void *_obj : _objects)
         clearGhostVtable(_obj);
@@ -122,6 +130,7 @@ void VtableHook::clearAllGhostVtable()
  */
 int VtableHook::getDestructFunIndex(quintptr **obj, std::function<void(void)> destoryObjFun)
 {
+    qCDebug(vtableHook) << "getDestructFunIndex called, obj:" << obj;
     class _DestoryProbe
     {
     public:
@@ -146,8 +155,10 @@ int VtableHook::getDestructFunIndex(quintptr **obj, std::function<void(void)> de
     quintptr *vtable = *obj;
     int vtable_size = getVtableSize(obj);
 
-    if (vtable_size == 0)
+    if (vtable_size == 0) {
+        qCDebug(vtableHook) << "Vtable size is 0, returning -1";
         return -1;
+    }
 
     quintptr *new_vtable = new quintptr[vtable_size];
     std::fill(adjustToEntry(new_vtable), new_vtable + vtable_size, quintptr(&_DestoryProbe::nothing));
@@ -165,6 +176,7 @@ int VtableHook::getDestructFunIndex(quintptr **obj, std::function<void(void)> de
         destoryObjFun();
 
         if (_DestoryProbe::probe(0) == quintptr(obj)) {
+            qCDebug(vtableHook) << "Found destructor function at index:" << i;
             index = adjustToTop(i);
             break;
         }
@@ -180,12 +192,16 @@ int VtableHook::getDestructFunIndex(quintptr **obj, std::function<void(void)> de
 
 void VtableHook::autoCleanVtable(const void *obj)
 {
+    qCDebug(vtableHook) << "autoCleanVtable called, obj:" << obj;
     quintptr fun = objDestructFun.value(obj);
 
-    if (!fun)
+    if (!fun) {
+        qCDebug(vtableHook) << "No destructor function found for object";
         return;
+    }
 
     if (hasVtable(obj)) {// 需要判断一下，有可能在执行析构函数时虚表已经被删除
+        qCDebug(vtableHook) << "Cleaning ghost vtable for object";
         // clean
         clearGhostVtable(obj);
     }
@@ -198,19 +214,25 @@ void VtableHook::autoCleanVtable(const void *obj)
 
 bool VtableHook::ensureVtable(const void *obj, std::function<void ()> destoryObjFun)
 {
+    qCDebug(vtableHook) << "ensureVtable called, obj:" << obj;
     quintptr **_obj = (quintptr**)(obj);
 
     if (objToOriginalVfptr.contains(_obj)) {
+        qCDebug(vtableHook) << "Object already has vtable, checking if restored";
         // 不知道什么原因, 此时obj对象的虚表已经被还原
         if (objToGhostVfptr.value((void *)obj) != adjustToTop(*_obj)) {
+            qCDebug(vtableHook) << "Vtable was restored, clearing ghost vtable";
             clearGhostVtable((void*)obj);
         } else {
+            qCDebug(vtableHook) << "Vtable is still valid";
             return true;
         }
     }
 
-    if (!copyVtable(_obj))
+    if (!copyVtable(_obj)) {
+        qCDebug(vtableHook) << "Failed to copy vtable";
         return false;
+    }
 
     // 查找对象的析构函数
     int index = getDestructFunIndex(_obj, destoryObjFun);
@@ -241,21 +263,27 @@ bool VtableHook::ensureVtable(const void *obj, std::function<void ()> destoryObj
  */
 bool VtableHook::hasVtable(const void *obj)
 {
+    qCDebug(vtableHook) << "hasVtable called, obj:" << obj;
     quintptr **_obj = (quintptr**)(obj);
 
-    return objToGhostVfptr.contains(_obj);
+    const auto &result = objToGhostVfptr.contains(_obj);
+    qCDebug(vtableHook) << "Object has vtable:" << result;
+    return result;
 }
 
 void VtableHook::resetVtable(const void *obj)
 {
+    qCDebug(vtableHook) << "resetVtable called, obj:" << obj;
     quintptr **_obj = (quintptr**)obj;
     int vtable_size = getVtableSize(_obj);
     // 获取obj对象原本虚表的入口
     auto vtableHead = adjustToTop(*_obj);
     quintptr *vfptr_t2 = (quintptr*)vtableHead[vtable_size + 1]; // _obj - 2 + vtable_size + 1
 
-    if (!vfptr_t2)
+    if (!vfptr_t2) {
+        qCDebug(vtableHook) << "No original vtable found";
         return;
+    }
 
     if (!clearGhostVtable(obj))
         return;

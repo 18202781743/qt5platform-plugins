@@ -115,20 +115,24 @@ DPlatformIntegration::DPlatformIntegration(const QStringList &parameters, int &a
 
 DPlatformIntegration::~DPlatformIntegration()
 {
+    qCDebug(lcDxcb) << "DPlatformIntegration destructor called";
     sendEndStartupNotifition();
 
 #ifdef Q_OS_LINUX
     if (m_eventFilter) {
+        qCDebug(lcDxcb) << "Removing native event filter";
         qApp->removeNativeEventFilter(m_eventFilter);
         delete m_eventFilter;
     }
 #endif
 
 #ifdef USE_NEW_IMPLEMENTING
+    qCDebug(lcDxcb) << "Cleaning up new implementation resources";
     delete m_storeHelper;
     delete m_contextHelper;
 
     if (m_xsettings) {
+        qCDebug(lcDxcb) << "Deleting xsettings";
         delete m_xsettings;
         m_xsettings = nullptr;
     }
@@ -137,23 +141,31 @@ DPlatformIntegration::~DPlatformIntegration()
 
 void DPlatformIntegration::setWindowProperty(QWindow *window, const char *name, const QVariant &value)
 {
+    qCDebug(lcDxcb) << "setWindowProperty called, name:" << name << "value:" << value;
     if (isEnableNoTitlebar(window)) {
+        qCDebug(lcDxcb) << "Using NoTitlebarWindowHelper";
         DNoTitlebarWindowHelper::setWindowProperty(window, name, value);
     } else if (isEnableDxcb(window)) {
+        qCDebug(lcDxcb) << "Using PlatformWindowHelper";
         DPlatformWindowHelper::setWindowProperty(window, name, value);
+    } else {
+        qCDebug(lcDxcb) << "No special window helper enabled";
     }
 }
 
 bool DPlatformIntegration::enableDxcb(QWindow *window)
 {
-    qCDebug(lcDxcb) << "window:" << window << "window type:" << window->type() << "parent:" << window->parent();
+    qCDebug(lcDxcb) << "enableDxcb called, window:" << window << "window type:" << window->type() << "parent:" << window->parent();
 
-    if (window->type() == Qt::Desktop)
+    if (window->type() == Qt::Desktop) {
+        qCDebug(lcDxcb) << "Desktop window, returning false";
         return false;
+    }
 
     QNativeWindow *xw = static_cast<QNativeWindow*>(window->handle());
 
     if (!xw) {
+        qCDebug(lcDxcb) << "No native window handle, setting useDxcb property";
         window->setProperty(useDxcb, true);
 
         return true;
@@ -163,17 +175,23 @@ bool DPlatformIntegration::enableDxcb(QWindow *window)
     return false;
 #endif
 
-    if (DPlatformWindowHelper::mapped.value(xw))
+    if (DPlatformWindowHelper::mapped.value(xw)) {
+        qCDebug(lcDxcb) << "Window helper already mapped";
         return true;
+    }
 
-    if (xw->isExposed())
+    if (xw->isExposed()) {
+        qCDebug(lcDxcb) << "Window is exposed, returning false";
         return false;
+    }
 
     if (!DPlatformWindowHelper::windowRedirectContent(window)) {
         QPlatformBackingStore *store = reinterpret_cast<QPlatformBackingStore*>(qvariant_cast<quintptr>(window->property("_d_dxcb_BackingStore")));
 
-        if (!store)
+        if (!store) {
+            qCDebug(lcDxcb) << "No backing store found";
             return false;
+        }
 
         QSurfaceFormat format = window->format();
 
@@ -203,7 +221,10 @@ bool DPlatformIntegration::enableDxcb(QWindow *window)
 
 bool DPlatformIntegration::isEnableDxcb(const QWindow *window)
 {
-    return window->property(useDxcb).toBool();
+    qCDebug(lcDxcb) << "isEnableDxcb called for window:" << window;
+    const auto &result = window->property(useDxcb).toBool();
+    qCDebug(lcDxcb) << "DXCB enabled:" << result;
+    return result;
 }
 
 bool DPlatformIntegration::setEnableNoTitlebar(QWindow *window, bool enable)
@@ -245,17 +266,24 @@ bool DPlatformIntegration::setEnableNoTitlebar(QWindow *window, bool enable)
 
 bool DPlatformIntegration::isEnableNoTitlebar(const QWindow *window)
 {
-    return window->property(noTitlebar).toBool();
+    qCDebug(lcDxcb) << "isEnableNoTitlebar called for window:" << window;
+    const auto &result = window->property(noTitlebar).toBool();
+    qCDebug(lcDxcb) << "No titlebar enabled:" << result;
+    return result;
 }
 
 bool DPlatformIntegration::buildNativeSettings(QObject *object, quint32 settingWindow)
 {
+    qCDebug(lcDxcb) << "buildNativeSettings called, object:" << object << "settingWindow:" << settingWindow;
     QByteArray settings_property = DNativeSettings::getSettingsProperty(object);
+    qCDebug(lcDxcb) << "Settings property:" << settings_property;
     DXcbXSettings *settings = nullptr;
     bool global_settings = false;
     if (settingWindow || !settings_property.isEmpty()) {
+        qCDebug(lcDxcb) << "Creating specific XSettings";
         settings = new DXcbXSettings(DPlatformIntegration::xcbConnection()->xcb_connection(), settingWindow, settings_property);
     } else {
+        qCDebug(lcDxcb) << "Using global XSettings";
         global_settings = true;
         settings = DPlatformIntegration::instance()->xSettings();
     }
@@ -264,21 +292,29 @@ bool DPlatformIntegration::buildNativeSettings(QObject *object, quint32 settingW
     auto native_settings = new DNativeSettings(object, settings, global_settings);
 
     if (!native_settings->isValid()) {
+        qCDebug(lcDxcb) << "Native settings is not valid, cleaning up";
         delete native_settings;
         return false;
     }
 
+    qCDebug(lcDxcb) << "Native settings built successfully";
     return true;
 }
 
 void DPlatformIntegration::clearNativeSettings(quint32 settingWindow)
 {
+    qCDebug(lcDxcb) << "clearNativeSettings called, settingWindow:" << settingWindow;
 #ifdef Q_OS_LINUX
     DXcbXSettings::clearSettings(settingWindow);
+    qCDebug(lcDxcb) << "Native settings cleared for Linux";
+#else
+    qCDebug(lcDxcb) << "Native settings clearing not supported on this platform";
 #endif
 }
 
 void DPlatformIntegration::setWMClassName(const QByteArray &name)
+{
+    qCDebug(lcDxcb) << "setWMClassName called, name:" << name;
 {
     if (auto self = instance())
         self->m_wmClass = name;

@@ -19,6 +19,7 @@
 #include <QGuiApplication>
 #include <QLibrary>
 #include <QDebug>
+#include <QLoggingCategory>
 
 #include <private/qguiapplication_p.h>
 #include <private/qpaintdevicewindow_p.h>
@@ -31,6 +32,12 @@
 #include <cairo-xlib.h>
 #endif
 
+#ifndef QT_DEBUG
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb", QtInfoMsg);
+#else
+Q_LOGGING_CATEGORY(dxcb, "dtk.qpa.xcb");
+#endif
+
 DPP_BEGIN_NAMESPACE
 
 class Cairo
@@ -38,14 +45,18 @@ class Cairo
 public:
     Cairo()
     {
+        qCDebug(dxcb) << "Cairo constructor called";
         // fix found lib was libcairo2-dev without version number
         cairo = new QLibrary("cairo", "2");
 
         if (!cairo->load()) {
+            qCDebug(dxcb) << "Failed to load cairo library";
             delete cairo;
             cairo = nullptr;
             return;
         }
+
+        qCDebug(dxcb) << "Cairo library loaded successfully";
 
 #define INIT_FUN(Name) Name = reinterpret_cast<decltype(Name)>(cairo->resolve(#Name)); Q_ASSERT(Name)
 
@@ -72,13 +83,16 @@ public:
 
     ~Cairo()
     {
+        qCDebug(dxcb) << "Cairo destructor called";
         if (cairo)
             delete cairo;
     }
 
     bool isValid() const
     {
-        return cairo;
+        bool result = cairo != nullptr;
+        qCDebug(dxcb) << "Cairo isValid called, result:" << result;
+        return result;
     }
 
     cairo_surface_t *(*cairo_image_surface_create_for_data)(unsigned char *data, cairo_format_t  format, int width, int height, int stride);
@@ -214,14 +228,19 @@ DFrameWindow::DFrameWindow(QWindow *content)
 
 DFrameWindow::~DFrameWindow()
 {
+    qCDebug(dxcb) << "DFrameWindow destructor called";
     frameWindowList.removeOne(this);
 
 #ifdef Q_OS_LINUX
-    if (nativeWindowXSurface)
+    if (nativeWindowXSurface) {
+        qCDebug(dxcb) << "Destroying native window X surface";
         __cairo->cairo_surface_destroy(nativeWindowXSurface);
+    }
 
-    if (nativeWindowXPixmap != XCB_PIXMAP_NONE)
+    if (nativeWindowXPixmap != XCB_PIXMAP_NONE) {
+        qCDebug(dxcb) << "Freeing native window X pixmap";
         xcb_free_pixmap(DPlatformIntegration::xcbConnection()->xcb_connection(), nativeWindowXPixmap);
+    }
 #endif
 
     delete platformBackingStore;
@@ -229,18 +248,23 @@ DFrameWindow::~DFrameWindow()
 
 QWindow *DFrameWindow::contentWindow() const
 {
+    qCDebug(dxcb) << "contentWindow called";
     return m_contentWindow.data();
 }
 
 int DFrameWindow::shadowRadius() const
 {
+    qCDebug(dxcb) << "shadowRadius called, returning:" << m_shadowRadius;
     return m_shadowRadius;
 }
 
 void DFrameWindow::setShadowRadius(int radius)
 {
-    if (m_shadowRadius == radius)
+    qCDebug(dxcb) << "setShadowRadius called, radius:" << radius;
+    if (m_shadowRadius == radius) {
+        qCDebug(dxcb) << "Shadow radius unchanged, skipping update";
         return;
+    }
 
     m_shadowRadius = radius;
 
@@ -249,13 +273,17 @@ void DFrameWindow::setShadowRadius(int radius)
 
 QPoint DFrameWindow::shadowOffset() const
 {
+    qCDebug(dxcb) << "shadowOffset called, returning:" << m_shadowOffset;
     return m_shadowOffset;
 }
 
 void DFrameWindow::setShadowOffset(const QPoint &offset)
 {
-    if (m_shadowOffset == offset)
+    qCDebug(dxcb) << "setShadowOffset called, offset:" << offset;
+    if (m_shadowOffset == offset) {
+        qCDebug(dxcb) << "Shadow offset unchanged, skipping update";
         return;
+    }
 
     m_shadowOffset = offset;
 
@@ -264,13 +292,17 @@ void DFrameWindow::setShadowOffset(const QPoint &offset)
 
 QColor DFrameWindow::shadowColor() const
 {
+    qCDebug(dxcb) << "shadowColor called, returning:" << m_shadowColor;
     return m_shadowColor;
 }
 
 void DFrameWindow::setShadowColor(const QColor &color)
 {
-    if (m_shadowColor == color)
+    qCDebug(dxcb) << "setShadowColor called, color:" << color;
+    if (m_shadowColor == color) {
+        qCDebug(dxcb) << "Shadow color unchanged, skipping update";
         return;
+    }
 
     m_shadowColor = color;
 
@@ -279,14 +311,19 @@ void DFrameWindow::setShadowColor(const QColor &color)
 
 int DFrameWindow::borderWidth() const
 {
+    qCDebug(dxcb) << "borderWidth called, returning:" << m_borderWidth;
     return m_borderWidth;
 }
 
 void DFrameWindow::setBorderWidth(int width)
 {
-    if (m_borderWidth == width)
+    qCDebug(dxcb) << "setBorderWidth called, width:" << width;
+    if (m_borderWidth == width) {
+        qCDebug(dxcb) << "Border width unchanged, skipping update";
         return;
+    }
 
+    qCDebug(dxcb) << "Border width changed from" << m_borderWidth << "to" << width;
     m_borderWidth = width;
 
     updateContentMarginsHint();
@@ -294,14 +331,19 @@ void DFrameWindow::setBorderWidth(int width)
 
 QColor DFrameWindow::borderColor() const
 {
+    qCDebug(dxcb) << "borderColor called, returning:" << m_borderColor;
     return m_borderColor;
 }
 
 void DFrameWindow::setBorderColor(const QColor &color)
 {
-    if (m_borderColor == color)
+    qCDebug(dxcb) << "setBorderColor called, color:" << color;
+    if (m_borderColor == color) {
+        qCDebug(dxcb) << "Border color unchanged, skipping update";
         return;
+    }
 
+    qCDebug(dxcb) << "Border color changed from" << m_borderColor << "to" << color;
     m_borderColor = color;
 
     updateShadowAsync();
@@ -309,6 +351,7 @@ void DFrameWindow::setBorderColor(const QColor &color)
 
 QPainterPath DFrameWindow::contentPath() const
 {
+    qCDebug(dxcb) << "contentPath called";
     return m_clipPathOfContent;
 }
 
@@ -320,11 +363,13 @@ inline static QSize margins2Size(const QMargins &margins)
 
 void DFrameWindow::setContentPath(const QPainterPath &path)
 {
+    qCDebug(dxcb) << "setContentPath called with path";
     setContentPath(path, false);
 }
 
 void DFrameWindow::setContentRoundedRect(const QRect &rect, int radius)
 {
+    qCDebug(dxcb) << "setContentRoundedRect called, rect:" << rect << "radius:" << radius;
     QPainterPath path;
 
     path.addRoundedRect(rect, radius, radius);
@@ -335,27 +380,35 @@ void DFrameWindow::setContentRoundedRect(const QRect &rect, int radius)
 
 QMargins DFrameWindow::contentMarginsHint() const
 {
+    qCDebug(dxcb) << "contentMarginsHint called, returning:" << m_contentMarginsHint;
     return m_contentMarginsHint;
 }
 
 QPoint DFrameWindow::contentOffsetHint() const
 {
+    qCDebug(dxcb) << "contentOffsetHint called";
     return QPoint(m_contentMarginsHint.left(), m_contentMarginsHint.top());
 }
 
 bool DFrameWindow::isClearContentAreaForShadowPixmap() const
 {
+    qCDebug(dxcb) << "isClearContentAreaForShadowPixmap called, returning:" << m_clearContent;
     return m_clearContent;
 }
 
 void DFrameWindow::setClearContentAreaForShadowPixmap(bool clear)
 {
-    if (m_clearContent == clear)
+    qCDebug(dxcb) << "setClearContentAreaForShadowPixmap called, clear:" << clear;
+    if (m_clearContent == clear) {
+        qCDebug(dxcb) << "Clear content setting unchanged, skipping update";
         return;
+    }
 
+    qCDebug(dxcb) << "Clear content setting changed from" << m_clearContent << "to" << clear;
     m_clearContent = clear;
 
     if (clear && !m_shadowImage.isNull()) {
+        qCDebug(dxcb) << "Clearing content area in shadow pixmap";
         QPainter pa(&m_shadowImage);
 
         pa.setCompositionMode(QPainter::CompositionMode_Clear);
@@ -367,36 +420,47 @@ void DFrameWindow::setClearContentAreaForShadowPixmap(bool clear)
 
 bool DFrameWindow::isEnableSystemResize() const
 {
+    qCDebug(dxcb) << "isEnableSystemResize called, returning:" << m_enableSystemResize;
     return m_enableSystemResize;
 }
 
 void DFrameWindow::setEnableSystemResize(bool enable)
 {
+    qCDebug(dxcb) << "setEnableSystemResize called, enable:" << enable;
     m_enableSystemResize = enable;
 
-    if (!m_enableSystemResize)
+    if (!m_enableSystemResize) {
+        qCDebug(dxcb) << "System resize disabled, canceling window move/resize";
         Utility::cancelWindowMoveResize(Utility::getNativeTopLevelWindow(winId()));
+    }
 }
 
 bool DFrameWindow::isEnableSystemMove() const
 {
+    qCDebug(dxcb) << "isEnableSystemMove called";
 #ifdef Q_OS_LINUX
-    if (!m_enableSystemMove)
+    if (!m_enableSystemMove) {
+        qCDebug(dxcb) << "System move disabled by local setting";
         return false;
+    }
 
     quint32 hints = DXcbWMSupport::getMWMFunctions(Utility::getNativeTopLevelWindow(winId()));
-
-    return (hints == DXcbWMSupport::MWM_FUNC_ALL || hints & DXcbWMSupport::MWM_FUNC_MOVE);
+    const bool result = (hints == DXcbWMSupport::MWM_FUNC_ALL || hints & DXcbWMSupport::MWM_FUNC_MOVE);
+    qCDebug(dxcb) << "System move enabled by window manager hints:" << result;
+    return result;
 #endif
 
+    qCDebug(dxcb) << "System move enabled by local setting:" << m_enableSystemMove;
     return m_enableSystemMove;
 }
 
 void DFrameWindow::setEnableSystemMove(bool enable)
 {
+    qCDebug(dxcb) << "setEnableSystemMove called, enable:" << enable;
     m_enableSystemMove = enable;
 
     if (!m_enableSystemMove) {
+        qCDebug(dxcb) << "System move disabled, resetting cursor and canceling operations";
         setCursor(Qt::ArrowCursor);
 
         cancelAdsorbCursor();
