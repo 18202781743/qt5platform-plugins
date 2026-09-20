@@ -38,6 +38,7 @@ jobs:
           mk-build-deps --install --remove --tool='apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends --yes' debian/control
 
       - name: Build qt5platform-plugins deb packages
+        shell: bash
         run: |
           dpkg-buildpackage -uc -us -b 2>&1 | tee /tmp/build.log; BUILD_STATUS=${PIPESTATUS[0]}
           if [ $BUILD_STATUS -ne 0 ]; then
